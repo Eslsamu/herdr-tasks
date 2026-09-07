@@ -4,11 +4,22 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-07
+
+### Added
+
+- Add a conflict-safe default `alt+t` shortcut, presented as Option+T on macOS and Alt+T on Linux, for opening the active space's browser queue.
+
+### Changed
+
+- Replace incorrect sidebar-menu instructions with the actual shortcut and command paths.
+- Document the terminal-level Alt/Meta requirement instead of promising that every terminal forwards Option/Alt identically.
+
+## [0.3.1] - 2026-09-07
+
 ### Added
 
 - Add a deterministic, fully synthetic product demo with reproducible MP4, WebM, and poster outputs.
-
-## [0.3.1] - 2026-09-07
 
 ### Fixed
 
@@ -51,7 +62,8 @@ All notable changes are documented here. The project follows semantic versioning
 
 - Agent-owned SQLite task boards, ownership, atomic claims, dependencies, and Codex workflow skill.
 
-[Unreleased]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Eslsamu/herdr-tasks/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Eslsamu/herdr-tasks/compare/v0.1.0...v0.2.0

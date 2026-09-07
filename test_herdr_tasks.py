@@ -588,7 +588,8 @@ class IntegrationTests(unittest.TestCase):
                 app.setup()
                 self.assertEqual(once, config.read_text())
                 self.assertIn(original, once)
-                self.assertNotIn("prefix+shift+t",once)
+                self.assertEqual(once.count('key = "alt+t"'), 1)
+                self.assertIn('command = "herdr-tasks.open"', once)
                 self.assertEqual(once.count('[[ui.tab_bar_right]]'), 1)
                 self.assertIn(app.shlex.join([sys.executable,str(app.ROOT/"herdr_tasks.py"),"status"]),once)
                 self.assertTrue((root/".local/bin/herdr-tasks").is_symlink())
@@ -601,17 +602,37 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(data.read_bytes(), b"preserve me")
 
     def test_setup_skips_conflicting_shortcut(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config = root/"herdr.toml"
-            original = '[[keys.command]]\nkey="prefix+shift+t"\ncommand="existing"\n'
-            config.write_text(original)
-            with patch.object(Path, "home", return_value=root), patch.dict(os.environ, {
-                "HERDR_ENV": "1", "HERDR_CONFIG_PATH": str(config)
-            }), patch.object(app, "herdr", return_value="ok"):
-                app.setup()
-                self.assertIn(original, config.read_text())
-                self.assertEqual(config.read_text().count("prefix+shift+t"), 1)
+        conflicts = (
+            '[[keys.command]]\nkey = "ALT+T" # user binding\ncommand="existing"\n',
+            "[keys]\nnext_agent = 'Alt+T'\n",
+        )
+        for original in conflicts:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config = root/"herdr.toml"
+                config.write_text(original)
+                with patch.object(Path, "home", return_value=root), patch.dict(os.environ, {
+                    "HERDR_ENV": "1", "HERDR_CONFIG_PATH": str(config)
+                }), patch.object(app, "herdr", return_value="ok"):
+                    app.setup()
+                    self.assertIn(original, config.read_text())
+                    self.assertEqual(config.read_text().lower().count("alt+t"), 1)
+                    self.assertNotIn('command = "herdr-tasks.open"', config.read_text())
+
+    def test_setup_supports_custom_or_no_shortcut(self):
+        for key, expected in (("prefix+t", 'key = "prefix+t"'), ("", None)):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config = root/"herdr.toml"
+                with patch.object(Path, "home", return_value=root), patch.dict(os.environ, {
+                    "HERDR_ENV": "1", "HERDR_CONFIG_PATH": str(config)
+                }), patch.object(app, "herdr", return_value="ok"):
+                    app.setup(key=key)
+                    rendered = config.read_text()
+                    if expected:
+                        self.assertIn(expected, rendered)
+                    else:
+                        self.assertNotIn("herdr-tasks.open", rendered)
 
     def test_setup_restores_invalid_config(self):
         with tempfile.TemporaryDirectory() as tmp:
