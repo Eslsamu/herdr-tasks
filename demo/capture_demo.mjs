@@ -13,10 +13,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEMO = path.join(ROOT, "demo");
 const WEB = path.join(ROOT, "web");
 const OUTPUT = path.join(ROOT, "docs", "assets");
-const WIDTH = 1920;
-const HEIGHT = 1080;
+const WIDTH = 1440;
+const HEIGHT = 900;
 const VIEWER_WIDTH = 1440;
-const VIEWER_HEIGHT = 900;
+const VIEWER_HEIGHT = 860;
 const FPS = 30;
 const FRAME_COUNT = 720;
 const POSTER_FRAME = 384;
@@ -100,6 +100,9 @@ async function makeServer(fixture, temporary) {
       if (pathname === "/capture.html") {
         body = captureHtml;
         type = contentType(pathname);
+      } else if (pathname === "/terminal.json") {
+        body = await readFile(path.join(temporary, "terminal.json"));
+        type = contentType(pathname);
       } else if (pathname === "/capture-data.json") {
         body = fixtureJson;
         type = contentType(pathname);
@@ -171,7 +174,7 @@ async function captureViewer(context, origin, state, output, failures) {
   assert.equal(metrics.width, VIEWER_WIDTH);
   assert.equal(metrics.height, VIEWER_HEIGHT);
   assert.equal(metrics.scrollWidth, VIEWER_WIDTH);
-  assert.equal(metrics.title, "Demo workspace / Launch readiness");
+  assert.equal(metrics.title, "SpaceName / Launch readiness");
   await page.screenshot({ path: output, animations: "disabled" });
   await page.close();
 }
@@ -188,6 +191,7 @@ async function main() {
   const python = process.env.PYTHON || "python3";
   const ffmpeg = process.env.FFMPEG || "ffmpeg";
   run(python, [path.join(DEMO, "make_fixture.py"), fixturePath]);
+  run(python, [path.join(DEMO, "capture_terminal.py"), path.join(temporary, "terminal.json"), fixturePath]);
   const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
   assert.equal(fixture.synthetic, true);
   assert.equal(fixture.duration_ms, 24_000);
@@ -261,11 +265,17 @@ async function main() {
     });
     assert.deepEqual(failures, []);
 
+    let previousStep;
+    let previousFile;
     for (let frame = 0; frame < FRAME_COUNT; frame += 1) {
       const time = frame * 1000 / FPS;
       await page.evaluate((value) => window.__setDemoTime(value), time);
       const filename = path.join(frames, `frame-${String(frame).padStart(4, "0")}.png`);
-      await page.screenshot({ path: filename, animations: "disabled" });
+      const step = time < 5000 ? 0 : time < 11000 ? 1 : time < 17000 ? 2 : time < 19500 ? 3 : 4;
+      if (step === previousStep) await copyFile(previousFile, filename);
+      else await page.screenshot({ path: filename, animations: "disabled" });
+      previousStep = step;
+      previousFile = filename;
       if ((frame + 1) % 90 === 0) {
         process.stdout.write(`Captured ${frame + 1}/${FRAME_COUNT} frames\n`);
       }
@@ -301,6 +311,10 @@ async function main() {
   );
 
   const outputs = {};
+  const gif = path.join(OUTPUT, "herdr-tasks-demo.gif");
+  run(ffmpeg, ["-v", "error", "-y", "-i", mp4, "-filter_complex",
+    "[0:v]fps=8,scale=1440:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle",
+    "-loop", "0", gif]);
   for (const file of [mp4, webm, poster]) outputs[path.basename(file)] = (await stat(file)).size;
   process.stdout.write(`${JSON.stringify({ frameCount: FRAME_COUNT, outputs }, null, 2)}\n`);
   await rm(temporary, { recursive: true, force: true });
