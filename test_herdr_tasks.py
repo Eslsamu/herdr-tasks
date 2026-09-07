@@ -434,6 +434,7 @@ class BrowserTests(unittest.TestCase):
                     server, method, self.api_path(), body=b'{"status":"done"}',
                 )
                 self.assertEqual(status, 405)
+                self.assertEqual(headers.get("connection"), "close")
                 self.assertNotIn("access-control-allow-origin", headers)
                 self.assertIn(b"Read-only", content)
         self.assertEqual(self.store.show(self.task), before)
@@ -661,12 +662,11 @@ class TerminalTests(unittest.TestCase):
                 try:
                     expect(b"Ship the demo")
                     expect(b"Now")
-                    mouse_y = 4 if height < 12 else 5
-                    if b"?1006h" in output:
-                        os.write(master,f"\x1b[<0;4;{mouse_y}M\x1b[<0;4;{mouse_y}m".encode())
-                    else:
-                        # macOS terminfo requests classic xterm mouse reports.
-                        os.write(master,b"\x1b[M"+bytes((32,36,32+mouse_y))+b"\x1b[M"+bytes((35,36,32+mouse_y)))
+                    # Use the viewer's documented keyboard path here. Synthetic
+                    # xterm mouse reports are interpreted differently by the
+                    # ncurses builds on macOS and Ubuntu, while Enter exercises
+                    # the same selected-task toggle deterministically.
+                    os.write(master,b"\r")
                     if height == 5:
                         # The description is below the two-row viewport; page to it.
                         expect(b"1-2/3")

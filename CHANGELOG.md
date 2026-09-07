@@ -4,6 +4,14 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-07
+
+### Fixed
+
+- Make cross-platform terminal interaction tests deterministic across ncurses implementations.
+- Allow slower cold starts for the local viewer on clean macOS environments.
+- Close rejected browser mutation requests cleanly instead of parsing their bodies as new requests.
+
 ## [0.3.0] - 2026-09-07
 
 ### Added
@@ -39,7 +47,8 @@ All notable changes are documented here. The project follows semantic versioning
 
 - Agent-owned SQLite task boards, ownership, atomic claims, dependencies, and Codex workflow skill.
 
-[Unreleased]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Eslsamu/herdr-tasks/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Eslsamu/herdr-tasks/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Eslsamu/herdr-tasks/releases/tag/v0.1.0

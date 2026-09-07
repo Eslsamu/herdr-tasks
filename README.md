@@ -48,7 +48,7 @@ Requirements:
 Inside a named Herdr session:
 
 ```sh
-herdr plugin install Eslsamu/herdr-tasks --ref v0.3.0
+herdr plugin install Eslsamu/herdr-tasks --ref v0.3.1
 herdr plugin action invoke setup --plugin herdr-tasks
 ```
 

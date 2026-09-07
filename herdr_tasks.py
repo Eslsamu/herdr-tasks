@@ -25,7 +25,7 @@ import urllib.request
 
 from queue_view import ui, counts, clip
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 WEB_HOST = "127.0.0.1"
@@ -652,7 +652,7 @@ def spawn_web_server(session, workspace, board, database, label, token, port, re
                                 stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
 
 
-def wait_web_ready(process, ready_path, session, workspace, board, database, token, timeout=3):
+def wait_web_ready(process, ready_path, session, workspace, board, database, token, timeout=10):
     deadline = time.monotonic()+timeout
     while time.monotonic() < deadline:
         ready = read_web_state(ready_path)
@@ -830,6 +830,8 @@ def make_web_handler(session, database, workspace, board, token, snapshot_reader
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -889,6 +891,10 @@ def make_web_handler(session, database, workspace, board, token, snapshot_reader
             self.send_body(404, "text/plain; charset=utf-8", b"Not found\n")
 
         def do_POST(self):
+            # Mutation requests may carry a body that this read-only endpoint
+            # deliberately does not parse. Close after the response so those
+            # bytes cannot be mistaken for another HTTP/1.1 request.
+            self.close_connection = True
             if not self.allowed_host():
                 self.send_body(421, "text/plain; charset=utf-8", b"Local host required\n")
                 return
