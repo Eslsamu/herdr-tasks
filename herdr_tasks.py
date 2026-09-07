@@ -26,7 +26,7 @@ import urllib.request
 
 from queue_view import ui, counts, clip
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 WEB_HOST = "127.0.0.1"
@@ -34,6 +34,7 @@ WEB_READY_TIMEOUT = 15
 STATUSES = ("queued", "doing", "blocked", "done", "cancelled")
 MARK_START = "# herdr-tasks:begin"
 MARK_END = "# herdr-tasks:end"
+DEFAULT_KEY = "alt+t"
 
 
 def require(condition, message):
@@ -370,7 +371,15 @@ def config_path():
     return Path(os.environ.get("HERDR_CONFIG_PATH", str(Path.home()/".config/herdr/config.toml")))
 
 
-def setup(remove=False, key=None):
+def config_has_key(config, key):
+    pattern = re.compile(
+        r'''(?im)^\s*[a-z0-9_.-]+\s*=\s*(?P<quote>["'])(?P<value>[^"']+)(?P=quote)\s*(?:#.*)?$'''
+    )
+    return any(match.group("value").casefold() == key.casefold()
+               for match in pattern.finditer(config))
+
+
+def setup(remove=False, key=DEFAULT_KEY):
     require(os.environ.get("HERDR_ENV") == "1", "Run setup inside Herdr")
     dest = Path.home()/".local/bin/herdr-tasks"
     skill = Path.home()/".codex/skills/herdr-tasks"
@@ -392,8 +401,11 @@ def setup(remove=False, key=None):
         binding = ""
         if key:
             require(re.fullmatch(r"[a-z0-9+_-]+",key), "Use a Herdr key name such as alt+t")
-            require(key.lower() not in base.lower(), "That key is already configured; choose another or omit --key")
-            binding = '\n[[keys.command]]\nkey = '+json.dumps(key)+'\ntype = "plugin_action"\ncommand = "herdr-tasks.open"\ndescription = "Open space task queue in browser"\n'
+            if config_has_key(base, key):
+                print(f"Shortcut {key} is already configured; leaving it unchanged. "
+                      "Run herdr-tasks open or choose another --key.", file=sys.stderr)
+            else:
+                binding = '\n[[keys.command]]\nkey = '+json.dumps(key)+'\ntype = "plugin_action"\ncommand = "herdr-tasks.open"\ndescription = "Open space task queue in browser"\n'
         # Existing inline arrays cannot be extended with TOML array-of-table syntax.
         # Preserve them and explain the one manual entry instead of rewriting config.
         inline = re.search(r'(?m)^\s*(?:ui\.)?tab_bar_right\s*=',base)
@@ -1005,8 +1017,12 @@ def parser():
     b = sub.add_parser("bind-space", help="Link an existing queue to one Herdr workspace")
     b.add_argument("--workspace",required=True)
     sub.add_parser("status",help="Short read-only summary for Herdr's active workspace")
-    s = sub.add_parser("setup", help="Install CLI, skill and top-bar summary; optional shortcut")
-    s.add_argument("--key",help="Optional explicit Herdr binding, e.g. alt+t; no default")
+    s = sub.add_parser("setup", help="Install CLI, skill, top-bar summary, and task-view shortcut")
+    shortcut = s.add_mutually_exclusive_group()
+    shortcut.add_argument("--key", default=DEFAULT_KEY,
+                          help="Herdr binding for the browser view (default: alt+t)")
+    shortcut.add_argument("--no-key", action="store_true",
+                          help="Install without a keyboard shortcut")
     sub.add_parser("web-start", help="Start/reuse the session's local browser service")
     s = sub.add_parser("serve", help=argparse.SUPPRESS)
     s.add_argument("--session",required=True)
@@ -1058,7 +1074,8 @@ def main():
         session = session_key()
         if args.command == "uninstall":
             stopped = stop_web_servers(session)
-        result = setup(remove=args.command == "uninstall",key=getattr(args,"key",None))
+        key = "" if getattr(args, "no_key", False) else getattr(args, "key", DEFAULT_KEY)
+        result = setup(remove=args.command == "uninstall", key=key)
         if args.command == "setup":
             result["browsers"] = start_bound_web_servers(session)
         else:
