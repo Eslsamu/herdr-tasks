@@ -58,6 +58,16 @@ def session_key():
     return str(Path(os.environ["HERDR_SOCKET_PATH"]).resolve())
 
 
+def status_context():
+    # Herdr runs status commands on its server, not inside a managed pane.
+    # HERDR_ENV is deliberately absent there; only these active-context values
+    # identify the queue. Do not fall back to a caller pane or another session.
+    path = os.environ.get("HERDR_SOCKET_PATH", "")
+    workspace = os.environ.get("HERDR_ACTIVE_WORKSPACE_ID", "")
+    require(path and Path(path).is_absolute() and workspace, "No active Herdr status context")
+    return str(Path(path).resolve()), workspace
+
+
 def rpc(method, params):
     """Only needed for split ratios, not exposed by this Herdr CLI version."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
@@ -356,11 +366,15 @@ def setup(remove=False, key=None):
         # Preserve them and explain the one manual entry instead of rewriting config.
         inline = re.search(r'(?m)^\s*(?:ui\.)?tab_bar_right\s*=',base)
         summary = ""
+        # The server does not inherit a pane's login-shell PATH. Pin the
+        # working interpreter used during setup, not /usr/bin/env python3.
+        command = shlex.join([sys.executable, str(ROOT/"herdr_tasks.py"), "status"])
         if not inline:
-            command = shlex.quote(str(dest))+" status"
             summary = '\n[[ui.tab_bar_right]]\ntype = "command"\ncommand = '+json.dumps(command)+'\ninterval_seconds = 2\ntimeout_seconds = 1\n'
         else:
-            print("Existing inline tab_bar_right preserved. Add a command entry running herdr-tasks status to enable the summary.",file=sys.stderr)
+            print('Existing inline tab_bar_right preserved. Add this entry to enable the summary: '
+                  '{ type = "command", command = '+json.dumps(command)+
+                  ', interval_seconds = 2, timeout_seconds = 1 }',file=sys.stderr)
         replacement = base.rstrip()+"\n\n"+MARK_START+binding+summary+"\n"+MARK_END+"\n"
     if replacement != original:
         config.parent.mkdir(parents=True, exist_ok=True)
@@ -446,7 +460,10 @@ def top_status(store, session, workspace):
     snapshot = store.snapshot(board)
     n = counts(snapshot)
     active = next((t for t in snapshot["tasks"] if t["status"] == "doing"),None)
-    lead = "Now: "+clip(active["title"],28) if active else "No active task"
+    ready = next((t for t in snapshot["tasks"] if t["status"] == "queued" and not t["waiting_on"]),None)
+    waiting = next((t for t in snapshot["tasks"] if t["status"] == "blocked" or t["status"] == "queued" and t["waiting_on"]),None)
+    lead = next((label+clip(task["title"],28) for label,task in
+                 (("Now: ",active),("Next: ",ready),("Waiting: ",waiting)) if task), "All clear")
     if n["now"] > 1:
         lead += f" (+{n['now']-1})"
     return f"Tasks · {lead} · {n['next']} next · {n['waiting']} waiting"
@@ -506,10 +523,13 @@ def main():
         # Never initialize a database or query another session as a fallback.
         store = None
         try:
+            session, workspace = status_context()
             store = Store(readonly=True)
-            print(top_status(store,session_key(),os.environ.get("HERDR_ACTIVE_WORKSPACE_ID","")))
-        except (ValueError,sqlite3.Error,OSError):
+            print(top_status(store,session,workspace))
+        except ValueError:
             print("")
+        except (sqlite3.Error,OSError):
+            print("Tasks · unavailable")
         finally:
             if store:
                 store.close()

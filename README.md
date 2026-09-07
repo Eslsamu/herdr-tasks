@@ -38,9 +38,11 @@ herdr plugin action invoke setup --plugin herdr-tasks
 
 Setup links the CLI into `~/.local/bin`, installs a Codex skill into `~/.codex/skills/herdr-tasks`, and adds a live current-space summary to Herdr's top tab bar. It backs up your config and preserves unrelated settings. **No shortcut is assigned by default.** Use Herdr's plugin action **Tasks: open space queue**, or `herdr-tasks open`.
 
+**The preview is visible without opening anything or prompting an agent.** It shows the current task (or the next/waiting task when idle) and queue counts, and follows the selected space. Closing the detail pane leaves the preview in place. Setup pins its working Python interpreter because Herdr's server does not use your terminal's login-shell PATH. Re-run setup if that interpreter or the checkout moves. Status reads only the server's session and active-space context; it does not require an agent pane or run agent commands.
+
 For an optional shortcut, run `herdr-tasks setup --key alt+t` with a binding your terminal actually delivers. This is an example, not a universal Mac keyboard recommendation. Configured conflicts are rejected. Running setup without `--key` removes the plugin's previous shortcut, including the old Ctrl+B / Shift+T binding.
 
-If your config already defines `tab_bar_right` as an inline array, setup preserves it. Add this entry to that array to enable the summary: `{ type = "command", command = "~/.local/bin/herdr-tasks status", interval_seconds = 2, timeout_seconds = 1 }`. Existing array-of-table entries coexist automatically. Herdr's status text is not clickable and may be hidden when the tab row is too narrow.
+If your config already defines `tab_bar_right` as an inline array, setup preserves it and prints the exact entry to add, including the working interpreter's absolute path. Existing array-of-table entries coexist automatically. Herdr's status text is not clickable and may be hidden when the tab row is too narrow.
 
 If `~/.local/bin` is not on your PATH, use `~/.local/bin/herdr-tasks` or add that directory to your normal shell configuration. Existing Codex threads can read `herdr-tasks skill` immediately; new threads can discover the installed skill normally.
 

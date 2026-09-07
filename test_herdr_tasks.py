@@ -171,6 +171,14 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.s.show(task)["title"],"Ship feature")
         self.s.bind_space(self.board,"one.sock","w1")
 
+    def test_preview_shows_next_or_waiting_work_when_nothing_is_active(self):
+        self.s.bind_space(self.board,"one.sock","w1")
+        self.assertIn("All clear",app.top_status(self.s,"one.sock","w1"))
+        task = self.add()
+        self.assertIn("Next: Ship feature",app.top_status(self.s,"one.sock","w1"))
+        self.s.update(task,A,status="blocked",note="Waiting for input")
+        self.assertIn("Waiting: Ship feature",app.top_status(self.s,"one.sock","w1"))
+
 
 class QueueTests(unittest.TestCase):
     def snapshot(self):
@@ -283,6 +291,31 @@ class QueueTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_status_runs_in_server_environment_without_a_pane_or_login_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"tasks.db"
+            session = str(Path(tmp).resolve()/"herdr.sock")
+            store = app.Store(path)
+            board = store.join("Preview",A)["board"]
+            store.bind_space(board,session,"w1")
+            task = store.add(board,A,"Preview without a prompt")["id"]
+            store.start(task,A)
+            store.close()
+            env = {"PATH":"/usr/bin:/bin", "HERDR_TASKS_DB":str(path),
+                   "HERDR_SOCKET_PATH":session,"HERDR_ACTIVE_WORKSPACE_ID":"w1"}
+            def status(values):
+                return subprocess.check_output([sys.executable,str(app.ROOT/"herdr_tasks.py"),"status"],
+                                               env=values,text=True,timeout=2).strip()
+            self.assertIn("Now: Preview without a prompt",status(env))
+            self.assertEqual(status({**env,"HERDR_SOCKET_PATH":str(Path(tmp)/"other.sock")}),"")
+            self.assertEqual(status({**env,"HERDR_ACTIVE_WORKSPACE_ID":"w2"}),"")
+            self.assertEqual(status({**env,"HERDR_ACTIVE_WORKSPACE_ID":""}),"")
+            absent = Path(tmp)/"absent.db"
+            self.assertEqual(status({**env,"HERDR_TASKS_DB":str(absent)}),"Tasks · unavailable")
+            self.assertFalse(absent.exists())
+            with patch.dict(os.environ,env,clear=True), self.assertRaises(ValueError):
+                app.session_key()  # Mutating commands still require a managed pane.
+
     def test_open_splits_and_reuses_without_replacing_agents(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = app.Store(Path(tmp)/"tasks.db")
@@ -338,6 +371,7 @@ class IntegrationTests(unittest.TestCase):
                 self.assertIn(original, once)
                 self.assertNotIn("prefix+shift+t",once)
                 self.assertEqual(once.count('[[ui.tab_bar_right]]'), 1)
+                self.assertIn(app.shlex.join([sys.executable,str(app.ROOT/"herdr_tasks.py"),"status"]),once)
                 self.assertTrue((root/".local/bin/herdr-tasks").is_symlink())
                 app.setup(remove=True)
                 self.assertEqual(config.read_text().strip(), original.strip())
