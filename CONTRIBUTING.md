@@ -33,7 +33,8 @@ Use a disposable named Herdr session and a temporary `HERDR_TASKS_DB` when testi
 | Responsive layout, focus, color modes, and reduced motion | `web/styles.css` |
 | Agent queue-maintenance contract | `skill/SKILL.md` |
 | Herdr entry points and portable launcher | `herdr-plugin.toml`, `run.sh` |
-| Behavioral tests and supported OS/Python matrix | `test_herdr_tasks.py`, `.github/workflows/test.yml` |
+| Synthetic demo fixture, deterministic capture, and media contract | `demo/`, `test_demo.py` |
+| Behavioral tests and supported OS/Python matrix | `test_herdr_tasks.py`, `test_demo.py`, `.github/workflows/test.yml` |
 
 Start queue-semantics changes in the store and its tests. Herdr lifecycle changes belong with identity, setup, and integration tests. HTTP or privacy changes belong with the browser payload/handler and browser tests. Browser behavior changes need both `web/` coverage and the manual browser checklist below. Agent-behavior changes must keep the installed skill and README examples aligned.
 
