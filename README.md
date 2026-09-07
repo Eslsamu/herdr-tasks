@@ -10,7 +10,7 @@ Herdr Tasks is a small local-first plugin for coordinating work across long-runn
 
 ![Animated demo: an agent adds follow-up work, the Herdr summary updates, and the space queue tracks progress.](docs/assets/herdr-tasks-demo.gif)
 
-*24-second demo using synthetic data.*
+*Example walkthrough: Herdr chat → browser queue. Scripted chat and sample tasks.*
 
 ## Try it in two minutes
 

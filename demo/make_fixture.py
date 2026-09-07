@@ -20,7 +20,7 @@ import herdr_tasks as tasks  # noqa: E402
 FIXED_TIME = 1_788_753_600
 SESSION_NAME = "demo-session.sock"
 WORKSPACE = "demo-workspace"
-WORKSPACE_LABEL = "Demo workspace"
+WORKSPACE_LABEL = "SpaceName"
 BOARD_NAME = "Launch readiness"
 AGENT_ONE = {"id": "codex:synthetic-agent-one", "name": "Agent One"}
 QA_AGENT = {"id": "codex:synthetic-qa", "name": "QA"}
@@ -69,6 +69,7 @@ def build_fixture():
                     priority=1,
                 )["id"]
                 store.update(follow_up, AGENT_ONE, unassign=True)
+                pending_preview = tasks.top_status(store, session, WORKSPACE)
                 store.update(
                     current,
                     AGENT_ONE,
@@ -109,6 +110,7 @@ def build_fixture():
         "workspace_label": WORKSPACE_LABEL,
         "board_name": BOARD_NAME,
         "working_preview": working_preview,
+        "pending_preview": pending_preview,
         "queued": queued,
         "claim": {
             "agent": "QA",
