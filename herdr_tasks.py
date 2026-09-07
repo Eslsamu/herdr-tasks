@@ -14,6 +14,7 @@ import shlex
 import shutil
 import signal
 import socket
+from socketserver import TCPServer
 import sqlite3
 import subprocess
 import sys
@@ -29,6 +30,7 @@ VERSION = "0.3.1"
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 WEB_HOST = "127.0.0.1"
+WEB_READY_TIMEOUT = 15
 STATUSES = ("queued", "doing", "blocked", "done", "cancelled")
 MARK_START = "# herdr-tasks:begin"
 MARK_END = "# herdr-tasks:end"
@@ -652,7 +654,8 @@ def spawn_web_server(session, workspace, board, database, label, token, port, re
                                 stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
 
 
-def wait_web_ready(process, ready_path, session, workspace, board, database, token, timeout=10):
+def wait_web_ready(process, ready_path, session, workspace, board, database, token,
+                   timeout=WEB_READY_TIMEOUT):
     deadline = time.monotonic()+timeout
     while time.monotonic() < deadline:
         ready = read_web_state(ready_path)
@@ -917,6 +920,15 @@ def make_web_handler(session, database, workspace, board, token, snapshot_reader
 class LocalWebServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
+
+    def server_bind(self):
+        # HTTPServer calls getfqdn() after bind and before listen. On macOS 15+
+        # that reverse lookup can stall under Local Network Privacy even for
+        # numeric loopback (actions/runner-images#14409). It adds no value to
+        # this loopback-only server, so keep TCPServer's real bind and use the
+        # already-known numeric address for the informational server fields.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def serve_web(session, workspace, board, port, database, token, ready, workspace_label):

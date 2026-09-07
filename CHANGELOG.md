@@ -9,7 +9,7 @@ All notable changes are documented here. The project follows semantic versioning
 ### Fixed
 
 - Make cross-platform terminal interaction tests deterministic across ncurses implementations.
-- Allow slower cold starts for the local viewer on clean macOS environments.
+- Skip an unnecessary reverse-DNS lookup for numeric loopback that can stall under macOS Local Network Privacy, and allow slower cold starts.
 - Close rejected browser mutation requests cleanly instead of parsing their bodies as new requests.
 
 ## [0.3.0] - 2026-09-07

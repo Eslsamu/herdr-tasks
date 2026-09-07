@@ -1,6 +1,5 @@
 import concurrent.futures
 import http.client
-from http.server import ThreadingHTTPServer
 import json
 import os
 import fcntl
@@ -351,7 +350,7 @@ class BrowserTests(unittest.TestCase):
             token=self.TOKEN,
             snapshot_reader=lambda _session: self.live,
         )
-        server = ThreadingHTTPServer((app.WEB_HOST, 0), handler)
+        server = app.LocalWebServer((app.WEB_HOST, 0), handler)
         server.daemon_threads = True
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -455,6 +454,17 @@ class BrowserTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_local_server_skips_reverse_dns(self):
+        with patch.object(app.socket, "getfqdn",
+                          side_effect=AssertionError("unexpected lookup")) as lookup:
+            server = app.LocalWebServer((app.WEB_HOST, 0), app.BaseHTTPRequestHandler)
+            try:
+                self.assertEqual(server.server_name, app.WEB_HOST)
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
+        lookup.assert_not_called()
+
     def test_local_server_binds_reuses_and_stops_for_one_space(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
