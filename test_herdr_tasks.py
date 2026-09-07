@@ -588,7 +588,7 @@ class IntegrationTests(unittest.TestCase):
                 app.setup()
                 self.assertEqual(once, config.read_text())
                 self.assertIn(original, once)
-                self.assertEqual(once.count('key = "alt+t"'), 1)
+                self.assertEqual(once.count('key = "prefix+ctrl+t"'), 1)
                 self.assertIn('command = "herdr-tasks.open"', once)
                 self.assertEqual(once.count('[[ui.tab_bar_right]]'), 1)
                 self.assertIn(app.shlex.join([sys.executable,str(app.ROOT/"herdr_tasks.py"),"status"]),once)
@@ -603,8 +603,8 @@ class IntegrationTests(unittest.TestCase):
 
     def test_setup_skips_conflicting_shortcut(self):
         conflicts = (
-            '[[keys.command]]\nkey = "ALT+T" # user binding\ncommand="existing"\n',
-            "[keys]\nnext_agent = 'Alt+T'\n",
+            '[[keys.command]]\nkey = "PREFIX+CTRL+T" # user binding\ncommand="existing"\n',
+            "[keys]\nnext_agent = 'Prefix+Ctrl+T'\n",
         )
         for original in conflicts:
             with self.subTest(original=original), tempfile.TemporaryDirectory() as tmp:
@@ -616,7 +616,7 @@ class IntegrationTests(unittest.TestCase):
                 }), patch.object(app, "herdr", return_value="ok"):
                     app.setup()
                     self.assertIn(original, config.read_text())
-                    self.assertEqual(config.read_text().lower().count("alt+t"), 1)
+                    self.assertEqual(config.read_text().lower().count("prefix+ctrl+t"), 1)
                     self.assertNotIn('command = "herdr-tasks.open"', config.read_text())
 
     def test_setup_supports_custom_or_no_shortcut(self):

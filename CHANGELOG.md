@@ -4,6 +4,13 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-07
+
+### Fixed
+
+- Replace the default Option/Alt shortcut with the terminal-independent Herdr sequence `prefix+ctrl+t` (`Ctrl+B`, then `Ctrl+T` with the default prefix).
+- Remove the macOS Meta-key requirement, which caused Option+T to type `†` in Apple Terminal for users without profile-level remapping.
+
 ## [0.3.2] - 2026-09-07
 
 ### Added
@@ -62,7 +69,8 @@ All notable changes are documented here. The project follows semantic versioning
 
 - Agent-owned SQLite task boards, ownership, atomic claims, dependencies, and Codex workflow skill.
 
-[Unreleased]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Eslsamu/herdr-tasks/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Eslsamu/herdr-tasks/compare/v0.2.0...v0.3.0
