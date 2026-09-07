@@ -34,7 +34,7 @@ class DemoTests(unittest.TestCase):
         runner = (ROOT / "demo" / "capture_demo.mjs").read_text(encoding="utf-8")
         self.assertIn("window.__setDemoTime", capture)
         self.assertIn("window.__DEMO_READY__", capture)
-        self.assertIn("Synthetic data", capture)
+        self.assertIn("data.synthetic", capture)
         self.assertIn("FRAME_COUNT = 720", runner)
         self.assertIn('server.listen(0, "127.0.0.1"', runner)
         self.assertNotIn("FindProjectsApp", capture)

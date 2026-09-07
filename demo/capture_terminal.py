@@ -66,10 +66,10 @@ def capture(output, fixture_path):
         env = {k:v for k,v in os.environ.items() if not k.startswith('HERDR_')}
         env.update(HERDR_CONFIG_PATH=str(config), HERDR_SOCKET_PATH=str(root / 'demo.sock'), XDG_CONFIG_HOME=str(root / 'config'), XDG_STATE_HOME=str(root / 'state'), TERM='xterm-256color', DEMO_STAGE=str(stage))
         master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 44, 104, 0, 0))
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 104, 0, 0))
         process = subprocess.Popen(['herdr', '--no-session'], stdin=slave, stdout=slave, stderr=slave, cwd=cwd, env=env, start_new_session=True)
         os.close(slave)
-        screen = pyte.Screen(104, 44)
+        screen = pyte.Screen(104, 36)
         stream = pyte.ByteStream(screen)
         def drain(seconds):
             until = time.monotonic() + seconds

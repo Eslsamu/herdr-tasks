@@ -7,12 +7,12 @@
 html,body { margin:0; width:1440px; height:900px; overflow:hidden; background:#1e1e2e; color:#cdd6f4; }
 header { height:40px; padding:10px 18px; font:16px system-ui; background:#181825; display:flex; justify-content:space-between; }
 main { position:relative; height:860px; }
-pre { margin:0; padding:10px 18px; font:19px/19px Menlo,monospace; overflow:hidden; }
+pre { margin:0; padding:10px 18px; font:18px/23px Menlo,monospace; overflow:hidden; }
 section { position:absolute; inset:0; background:#101310; }
 .address { display:none; }
 img { display:block; width:1440px; height:860px; }
 </style>
-<header><span>Herdr · SpaceName</span><span class="synthetic-label">Synthetic data</span></header>
+<header><span>Herdr · SpaceName</span></header>
 <main><pre id="terminal"></pre><section><div class="address">Browser · localhost · Tasks</div><img id="viewer" alt="Space task queue"></section></main>
 <script>
 Promise.all([fetch('/terminal.json').then(r=>r.json()),fetch('/capture-data.json').then(r=>r.json())]).then(async ([frames,data])=>{
