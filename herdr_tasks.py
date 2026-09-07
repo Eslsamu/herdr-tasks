@@ -6,15 +6,18 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
-import textwrap
 import time
 import unicodedata
 
-VERSION = "0.1.0"
+from queue_view import ui, counts, clip
+
+VERSION = "0.2.0"
 ROOT = Path(__file__).resolve().parent
 STATUSES = ("queued", "doing", "blocked", "done", "cancelled")
 MARK_START = "# herdr-tasks:begin"
@@ -50,6 +53,23 @@ def api(*args):
     return json.loads(herdr(*args))["result"]
 
 
+def session_key():
+    require(os.environ.get("HERDR_ENV") == "1" and os.environ.get("HERDR_SOCKET_PATH"), "Run inside a named Herdr session")
+    return str(Path(os.environ["HERDR_SOCKET_PATH"]).resolve())
+
+
+def rpc(method, params):
+    """Only needed for split ratios, not exposed by this Herdr CLI version."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(10)
+        connection.connect(session_key())
+        connection.sendall((json.dumps({"id":"herdr-tasks", "method":method, "params":params})+"\n").encode())
+        with connection.makefile("r") as stream:
+            result = json.loads(stream.readline())
+    require("error" not in result, str(result.get("error")))
+    return result["result"]
+
+
 def identity(target=None):
     pane = None
     if target is None:
@@ -65,6 +85,10 @@ def identity(target=None):
             "name": agent.get("name") or (pane or {}).get("label") or agent["pane_id"]}
 
 
+def actor_workspace(target=None):
+    return api("agent","get",target)["agent"]["workspace_id"] if target else api("pane","current","--current")["pane"]["workspace_id"]
+
+
 def db_path():
     if os.environ.get("HERDR_TASKS_DB"):
         return Path(os.environ["HERDR_TASKS_DB"]).expanduser().resolve()
@@ -73,14 +97,18 @@ def db_path():
 
 
 class Store:
-    def __init__(self, path=None):
+    def __init__(self, path=None, readonly=False):
         self.path = Path(path) if path else db_path()
+        if readonly:
+            self.db = sqlite3.connect(self.path.resolve().as_uri()+"?mode=ro", uri=True, timeout=1, isolation_level=None)
+            self.db.row_factory = sqlite3.Row
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=WAL")
-        require(self.db.execute("PRAGMA user_version").fetchone()[0] in (0, 1),
+        require(self.db.execute("PRAGMA user_version").fetchone()[0] in (0, 1, 2),
                 "This database needs a newer herdr-tasks version")
         self.db.executescript("""
           CREATE TABLE IF NOT EXISTS boards(
@@ -104,7 +132,14 @@ class Store:
             actor TEXT NOT NULL, action TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
           CREATE UNIQUE INDEX IF NOT EXISTS one_doing_per_owner
             ON tasks(board,owner) WHERE status='doing';
-          PRAGMA user_version=1;
+          CREATE TABLE IF NOT EXISTS spaces(
+            session TEXT NOT NULL, workspace TEXT NOT NULL,
+            board INTEGER NOT NULL UNIQUE REFERENCES boards(id),
+            PRIMARY KEY(session,workspace));
+          CREATE TABLE IF NOT EXISTS viewers(
+            session TEXT NOT NULL, tab TEXT NOT NULL, pane TEXT NOT NULL,
+            board INTEGER NOT NULL REFERENCES boards(id), PRIMARY KEY(session,tab));
+          PRAGMA user_version=2;
         """)
         os.chmod(self.path, 0o600)
 
@@ -123,6 +158,27 @@ class Store:
 
     def boards(self):
         return [dict(r) for r in self.db.execute("SELECT * FROM boards ORDER BY name")]
+
+    def bind_space(self, board, session, workspace):
+        def write():
+            current = self.space_board(session, workspace)
+            require(current in (None, board), "This space already has another queue; no binding was changed")
+            other = self.db.execute("SELECT session,workspace FROM spaces WHERE board=?", (board,)).fetchone()
+            require(other is None or tuple(other) == (session,workspace), "This queue is already linked to another space")
+            self.db.execute("INSERT OR IGNORE INTO spaces VALUES(?,?,?)",(session,workspace,board))
+            return {"board":board,"workspace":workspace}
+        return self.transaction(write)
+
+    def space_board(self, session, workspace):
+        row = self.db.execute("SELECT board FROM spaces WHERE session=? AND workspace=?", (session,workspace)).fetchone()
+        return row[0] if row else None
+
+    def viewer(self, session, tab):
+        row = self.db.execute("SELECT pane,board FROM viewers WHERE session=? AND tab=?", (session,tab)).fetchone()
+        return dict(row) if row else None
+
+    def remember_viewer(self, session, tab, pane, board):
+        self.db.execute("INSERT INTO viewers VALUES(?,?,?,?) ON CONFLICT(session,tab) DO UPDATE SET pane=excluded.pane,board=excluded.board",(session,tab,pane,board))
 
     def join(self, name, actor):
         name = text(name, 80)
@@ -271,124 +327,11 @@ class Store:
         return self.transaction(write)
 
 
-def ui(stdscr, store, initial=None):
-    try:
-        curses.curs_set(0)
-    except curses.error:
-        pass
-    stdscr.timeout(500)
-    colors = curses.has_colors()
-    if colors:
-        curses.start_color()
-        try:
-            curses.use_default_colors()
-            background = -1
-        except curses.error:
-            background = curses.COLOR_BLACK
-        for i, color in enumerate((curses.COLOR_CYAN, curses.COLOR_BLUE, curses.COLOR_YELLOW, curses.COLOR_GREEN), 1):
-            curses.init_pair(i, color, background)
-    def color_pair(number):
-        return curses.color_pair(number) if colors else 0
-    selected, scroll, detail = initial, 0, None
-    def put(y, x, value, width, attr=0):
-        h, w = stdscr.getmaxyx()
-        if 0 <= y < h and 0 <= x < w and width > 0:
-            try:
-                stdscr.addnstr(y, x, clean(value).replace("\n", " "), min(width, w-x-1), attr)
-            except curses.error:
-                pass
-    while True:
-        boards = store.boards()
-        if boards and selected not in [b["id"] for b in boards]:
-            selected = boards[0]["id"]
-        stdscr.erase()
-        h, w = stdscr.getmaxyx()
-        put(0, 2, "TASKS  /  agent-owned", w-4, curses.A_BOLD | color_pair(1))
-        snap = store.snapshot(selected) if boards else None
-        if not snap:
-            put(3, 2, "No boards yet. Ask an agent to run: herdr-tasks join <project>", w-4)
-        elif detail is not None:
-            t = store.show(detail)
-            lines = [f"#{t['id']}  {t['title']}", f"{t['status'].upper()}  |  {t['owner_name'] or 'Unassigned'}  |  priority {t['priority']}",
-                     "", t["detail"] or "No description", "", "Latest update", t["note"] or "—",
-                     "", "Depends on: " + (", ".join('#'+str(n) for n in t["needs"]) or "none"), "", "History"]
-            for event in t["history"][-20:]:
-                lines.append(time.strftime("%m-%d %H:%M", time.localtime(event["at"])) + "  " + event["action"] + "  " + event["body"])
-            wrapped = [part for line in lines for part in (textwrap.wrap(clean(line), max(10, w-5)) or [""])]
-            scroll = min(scroll, max(0, len(wrapped)-(h-5)))
-            for y, line in enumerate(wrapped[scroll:scroll+max(0,h-5)], 2):
-                put(y, 2, line, w-4)
-        else:
-            put(1, 2, snap["board"]["name"] + "  /  " + ", ".join(m["name"] for m in snap["members"]), w-4)
-            groups = [[t for t in snap["tasks"] if t["status"] == s] for s in STATUSES[:4]]
-            groups[3].sort(key=lambda t: (t["updated"], t["id"]), reverse=True)
-            groups[3] = groups[3][:20]
-            if w >= 108:
-                colwidth = (w-4)//4
-                visible = max(1, (h-7)//4)
-                scroll = min(scroll, max(0, max(map(len, groups))-visible))
-                for i, (status, tasks) in enumerate(zip(STATUSES, groups)):
-                    x = 2+i*colwidth
-                    put(3, x, f"{status.upper()}  {len(tasks)}", colwidth-2, curses.A_BOLD | color_pair(i+1))
-                    for row, t in enumerate(tasks[scroll:scroll+visible]):
-                        y = 5+row*4
-                        put(y, x, f"#{t['id']}  {t['title']}", colwidth-2, curses.A_BOLD)
-                        put(y+1, x, t["owner_name"] or "Unassigned", colwidth-2, curses.A_DIM)
-                        put(y+2, x, f"Waiting on {t['waiting_on']} task(s)" if t["waiting_on"] else t["note"], colwidth-2)
-            else:
-                lines = []
-                for i, (status, tasks) in enumerate(zip(STATUSES, groups)):
-                    lines.append((f"{status.upper()}  {len(tasks)}", i+1))
-                    for t in tasks:
-                        lines.extend((line, 0) for line in textwrap.wrap(clean(f"#{t['id']}  {t['title']}"), max(10,w-4)))
-                        lines.append(("  " + (t["owner_name"] or "Unassigned"), 0))
-                        note = f"Waiting on {t['waiting_on']} task(s)" if t["waiting_on"] else t["note"]
-                        if note:
-                            lines.append(("  " + note, 0))
-                    lines.append(("",0))
-                scroll = min(scroll, max(0, len(lines)-max(1,h-6)))
-                for y,(line,color) in enumerate(lines[scroll:scroll+max(0,h-6)],3):
-                    put(y,2,line,w-4,color_pair(color))
-            put(h-3, 2, "Agents maintain this board. New requests go in your agent chat.", w-4, curses.A_DIM)
-        put(h-1, 2, "b boards   j/k scroll   # task details   q/esc close" if detail is None else "j/k scroll   esc back   q close", w-4, curses.A_DIM)
-        stdscr.refresh()
-        key = stdscr.getch()
-        if key == ord('q') or (key == 27 and detail is None):
-            return
-        if key == 27:
-            detail, scroll = None, 0
-        elif key == ord('b') and boards:
-            ids = [b["id"] for b in boards]
-            selected = ids[(ids.index(selected)+1) % len(ids)]
-            detail, scroll = None, 0
-        elif key in (ord('j'), curses.KEY_DOWN):
-            scroll += 1
-        elif key in (ord('k'), curses.KEY_UP):
-            scroll = max(0, scroll-1)
-        elif key == ord('#') and snap:
-            # Small numeric lookup, no task editing in the viewer.
-            stdscr.timeout(-1)
-            digits = ""
-            while True:
-                put(h-1, 2, "Task #"+digits+" "*30, w-4)
-                stdscr.refresh()
-                ch = stdscr.getch()
-                if ch in (10,13,27):
-                    break
-                if ch in (127, curses.KEY_BACKSPACE):
-                    digits = digits[:-1]
-                elif 48 <= ch <= 57 and len(digits) < 10:
-                    digits += chr(ch)
-            if ch != 27 and digits and int(digits) in [t["id"] for t in snap["tasks"]]:
-                detail, scroll = int(digits), 0
-            stdscr.timeout(500)
-
-
 def config_path():
     return Path(os.environ.get("HERDR_CONFIG_PATH", str(Path.home()/".config/herdr/config.toml")))
 
 
-def setup(remove=False):
+def setup(remove=False, key=None):
     require(os.environ.get("HERDR_ENV") == "1", "Run setup inside Herdr")
     dest = Path.home()/".local/bin/herdr-tasks"
     skill = Path.home()/".codex/skills/herdr-tasks"
@@ -404,11 +347,21 @@ def setup(remove=False):
         for link, target in ((dest, ROOT/"herdr_tasks.py"), (skill, ROOT/"skill")):
             require(not link.exists() and not link.is_symlink() or link.is_symlink() and link.resolve() == target,
                     f"Refusing to replace an existing installation: {link}")
-        conflict = re.search(r'(?i)prefix\+shift\+t', base)
-        binding = '' if conflict else '\n[[keys.command]]\nkey = "prefix+shift+t"\ntype = "shell"\ncommand = "herdr plugin action invoke open --plugin herdr-tasks"\ndescription = "View agent task board"\n'
-        replacement = base.rstrip()+"\n\n"+MARK_START+binding+"\n"+MARK_END+"\n"
-        if conflict:
-            print("Shortcut already used; use the Tasks plugin action.", file=sys.stderr)
+        binding = ""
+        if key:
+            require(re.fullmatch(r"[a-z0-9+_-]+",key), "Use a Herdr key name such as alt+t")
+            require(key.lower() not in base.lower(), "That key is already configured; choose another or omit --key")
+            binding = '\n[[keys.command]]\nkey = '+json.dumps(key)+'\ntype = "shell"\ncommand = "herdr plugin action invoke open --plugin herdr-tasks"\ndescription = "Open space task queue"\n'
+        # Existing inline arrays cannot be extended with TOML array-of-table syntax.
+        # Preserve them and explain the one manual entry instead of rewriting config.
+        inline = re.search(r'(?m)^\s*(?:ui\.)?tab_bar_right\s*=',base)
+        summary = ""
+        if not inline:
+            command = shlex.quote(str(dest))+" status"
+            summary = '\n[[ui.tab_bar_right]]\ntype = "command"\ncommand = '+json.dumps(command)+'\ninterval_seconds = 2\ntimeout_seconds = 1\n'
+        else:
+            print("Existing inline tab_bar_right preserved. Add a command entry running herdr-tasks status to enable the summary.",file=sys.stderr)
+        replacement = base.rstrip()+"\n\n"+MARK_START+binding+summary+"\n"+MARK_END+"\n"
     if replacement != original:
         config.parent.mkdir(parents=True, exist_ok=True)
         backup = config.with_name(config.name+".herdr-tasks-backup")
@@ -435,20 +388,68 @@ def setup(remove=False):
     return {"cli": str(dest), "skill": str(skill), "removed": remove, "data": str(db_path())}
 
 
-def open_board(store):
-    # The action explicitly targets the focused pane; ordinary CLI work uses --current.
-    agents = api("agent", "list")["agents"]
-    selected = os.environ.get("HERDR_TASKS_BOARD")
-    focused = next((a for a in agents if a.get("focused")), None)
-    if focused:
+def parent_split(root, pane, path=()):
+    if root["type"] != "split":
+        return None
+    for second, child in ((False,root["first"]),(True,root["second"])):
+        if child["type"] == "pane" and child.get("pane_id") == pane:
+            return list(path),second
+        found = parent_split(child,pane,path+(second,))
+        if found:
+            return found
+    return None
+
+
+def open_board(store, target=None, focus=True):
+    session = session_key()
+    if target:
+        pane = api("pane","get",target)["pane"]
+    else:
+        snapshot = api("api","snapshot")["snapshot"]
+        pane = next((p for p in snapshot["panes"] if p["pane_id"] == snapshot["focused_pane_id"]),None)
+        require(pane is not None, "Focus a terminal in the space first")
+    board = store.space_board(session,pane["workspace_id"])
+    require(board is not None, "No queue linked to this space. Run herdr-tasks join NAME from its agent, or bind-space for an existing queue")
+    existing = store.viewer(session,pane["tab_id"])
+    if existing:
         try:
-            selected = store.resolve(actor=identity(focused["pane_id"]))
+            live = api("pane","get",existing["pane"])["pane"]
         except ValueError:
-            pass
-    args = ["plugin", "pane", "open", "--plugin", "herdr-tasks", "--entrypoint", "board", "--placement", "overlay", "--focus"]
-    if selected is not None:
-        args.extend(["--env", f"HERDR_TASKS_BOARD={selected}"])
-    return api(*args)
+            live = None
+        if live and live["tab_id"] == pane["tab_id"] and existing["board"] == board:
+            if focus:
+                api("plugin","pane","focus",live["pane_id"])
+            return {"pane":live,"reused":True}
+    arguments = ["plugin","pane","open","--plugin","herdr-tasks","--entrypoint","board",
+                 "--placement","split","--target-pane",pane["pane_id"],"--direction","down",
+                 "--no-focus","--env",f"HERDR_TASKS_BOARD={board}"]
+    if os.environ.get("HERDR_TASKS_DB"):
+        arguments += ["--env",f"HERDR_TASKS_DB={store.path.resolve()}"]
+    result = api(*arguments)
+    created = result["plugin_pane"]["pane"]
+    store.remember_viewer(session,created["tab_id"],created["pane_id"],board)
+    # Never layout.apply: it replaces PTYs. Change only our new parent split.
+    layout = rpc("layout.export",{"pane_id":created["pane_id"]})["layout"]
+    split = parent_split(layout["root"],created["pane_id"])
+    if split:
+        path,second = split
+        rpc("layout.set_split_ratio",{"tab_id":created["tab_id"],"path":path,"ratio":0.7 if second else 0.3})
+    if focus:
+        api("plugin","pane","focus",created["pane_id"])
+    return {"pane":created,"reused":False}
+
+
+def top_status(store, session, workspace):
+    board = store.space_board(session,workspace)
+    if board is None:
+        return ""
+    snapshot = store.snapshot(board)
+    n = counts(snapshot)
+    active = next((t for t in snapshot["tasks"] if t["status"] == "doing"),None)
+    lead = "Now: "+clip(active["title"],28) if active else "No active task"
+    if n["now"] > 1:
+        lead += f" (+{n['now']-1})"
+    return f"Tasks · {lead} · {n['next']} next · {n['waiting']} waiting"
 
 
 def parser():
@@ -481,9 +482,15 @@ def parser():
     group = u.add_mutually_exclusive_group()
     group.add_argument("--owner")
     group.add_argument("--unassign", action="store_true")
-    sub.add_parser("view", help="Read-only live terminal board")
-    sub.add_parser("open", help="Open board overlay for the focused agent")
-    sub.add_parser("setup", help="Install CLI, Codex skill, and a nonconflicting shortcut")
+    sub.add_parser("view", help="Read-only, clickable inline task list")
+    o = sub.add_parser("open", help="Open/reuse a compact task split in the focused space")
+    o.add_argument("--pane",help="Explicit terminal to split; otherwise focused terminal")
+    o.add_argument("--no-focus",action="store_true")
+    b = sub.add_parser("bind-space", help="Link an existing queue to one Herdr workspace")
+    b.add_argument("--workspace",required=True)
+    sub.add_parser("status",help="Short read-only summary for Herdr's active workspace")
+    s = sub.add_parser("setup", help="Install CLI, skill and top-bar summary; optional shortcut")
+    s.add_argument("--key",help="Optional explicit Herdr binding, e.g. alt+t; no default")
     sub.add_parser("uninstall", help="Remove integration; keep data")
     sub.add_parser("skill", help="Print the agent workflow")
     return p
@@ -494,8 +501,21 @@ def main():
     if args.command == "skill":
         print((ROOT/"skill/SKILL.md").read_text())
         return
+    if args.command == "status":
+        # Status commands have active workspace context but no agent/pane identity.
+        # Never initialize a database or query another session as a fallback.
+        store = None
+        try:
+            store = Store(readonly=True)
+            print(top_status(store,session_key(),os.environ.get("HERDR_ACTIVE_WORKSPACE_ID","")))
+        except (ValueError,sqlite3.Error,OSError):
+            print("")
+        finally:
+            if store:
+                store.close()
+        return
     if args.command in ("setup", "uninstall"):
-        result = setup(remove=args.command == "uninstall")
+        result = setup(remove=args.command == "uninstall",key=getattr(args,"key",None))
         print(json.dumps(result))
         return
     store = Store()
@@ -503,10 +523,14 @@ def main():
         if args.command == "boards":
             result = store.boards()
         elif args.command == "open":
-            result = open_board(store)
+            result = open_board(store,args.pane,not args.no_focus)
+        elif args.command == "bind-space":
+            require(args.board,"Use --board NAME before bind-space")
+            workspace = api("workspace","get",args.workspace)["workspace"]
+            result = store.bind_space(store.resolve(args.board),session_key(),workspace["workspace_id"])
         elif args.command == "view":
             selector = args.board or os.environ.get("HERDR_TASKS_BOARD")
-            board = store.resolve(selector) if selector else None
+            board = store.resolve(selector) if selector else store.space_board(session_key(),api("pane","current","--current")["pane"]["workspace_id"]) if os.environ.get("HERDR_ENV") == "1" else None
             curses.wrapper(ui, store, board)
             return
         elif args.command == "show":
@@ -516,13 +540,19 @@ def main():
         else:
             actor = identity(args.agent)
             if args.command == "join":
+                workspace = actor_workspace(args.agent)
+                existing = store.space_board(session_key(),workspace)
+                if existing is not None:
+                    require(store.resolve(args.name) == existing,"This space already has a queue; join its existing name")
                 result = store.join(args.name, actor)
+                store.bind_space(result["board"],session_key(),workspace)
             elif args.command == "start":
                 result = store.start(args.id, actor)
             elif args.command == "update":
                 result = store.update(args.id, actor, **{k:getattr(args,k) for k in ("status","note","title","priority","owner","unassign")})
             else:
-                board = store.resolve(args.board, actor)
+                bound = store.space_board(session_key(),actor_workspace(args.agent)) if not args.board else None
+                board = bound if bound is not None else store.resolve(args.board, actor)
                 if args.command == "list":
                     result = store.snapshot(board)
                 elif args.command == "add":

@@ -1,24 +1,24 @@
 id = "herdr-tasks"
 name = "Tasks"
-version = "0.1.0"
-description = "A shared task board maintained by your existing agents. You just watch."
+version = "0.2.0"
+description = "An agent-owned work queue with a compact native pane and space summary."
 min_herdr_version = "0.8.2"
 platforms = ["macos", "linux"]
 
 [[panes]]
 id = "board"
-title = "Tasks"
-placement = "overlay"
+title = "Tasks · click a task for details"
+placement = "split"
 command = ["python3", "herdr_tasks.py", "view"]
 
 [[actions]]
 id = "open"
-title = "Tasks: view agent board"
+title = "Tasks: open space queue"
 command = ["python3", "herdr_tasks.py", "open"]
 
 [[actions]]
 id = "setup"
-title = "Tasks: install CLI and shortcut"
+title = "Tasks: install CLI and space summary"
 command = ["python3", "herdr_tasks.py", "setup"]
 
 [[actions]]
