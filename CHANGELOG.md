@@ -4,6 +4,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## [Unreleased]
 
+### Added
+
+- Add a deterministic, fully synthetic product demo with reproducible MP4, WebM, and poster outputs.
+
 ## [0.3.1] - 2026-09-07
 
 ### Fixed

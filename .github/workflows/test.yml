@@ -30,10 +30,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Compile
-        run: python -m py_compile herdr_tasks.py queue_view.py test_herdr_tasks.py
+        run: python -m py_compile herdr_tasks.py queue_view.py demo/make_fixture.py test_herdr_tasks.py test_demo.py
       - name: Test
         run: python -W error::ResourceWarning -m unittest -v
       - name: Validate launcher
         run: sh -n run.sh
       - name: Validate browser JavaScript
-        run: node --check web/app.js
+        run: |
+          node --check web/app.js
+          node --check demo/capture_demo.mjs
