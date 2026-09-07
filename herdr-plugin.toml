@@ -1,6 +1,6 @@
 id = "herdr-tasks"
 name = "Tasks"
-version = "0.3.2"
+version = "0.3.3"
 description = "An agent-owned work queue with a live local viewer and space summary."
 min_herdr_version = "0.8.2"
 platforms = ["macos", "linux"]

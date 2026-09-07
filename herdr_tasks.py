@@ -26,7 +26,7 @@ import urllib.request
 
 from queue_view import ui, counts, clip
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 WEB_HOST = "127.0.0.1"
@@ -34,7 +34,7 @@ WEB_READY_TIMEOUT = 15
 STATUSES = ("queued", "doing", "blocked", "done", "cancelled")
 MARK_START = "# herdr-tasks:begin"
 MARK_END = "# herdr-tasks:end"
-DEFAULT_KEY = "alt+t"
+DEFAULT_KEY = "prefix+ctrl+t"
 
 
 def require(condition, message):
@@ -400,7 +400,8 @@ def setup(remove=False, key=DEFAULT_KEY):
                     f"Refusing to replace an existing installation: {link}")
         binding = ""
         if key:
-            require(re.fullmatch(r"[a-z0-9+_-]+",key), "Use a Herdr key name such as alt+t")
+            require(re.fullmatch(r"[a-z0-9+_-]+",key),
+                    "Use a Herdr key name such as prefix+ctrl+t")
             if config_has_key(base, key):
                 print(f"Shortcut {key} is already configured; leaving it unchanged. "
                       "Run herdr-tasks open or choose another --key.", file=sys.stderr)
@@ -1020,7 +1021,7 @@ def parser():
     s = sub.add_parser("setup", help="Install CLI, skill, top-bar summary, and task-view shortcut")
     shortcut = s.add_mutually_exclusive_group()
     shortcut.add_argument("--key", default=DEFAULT_KEY,
-                          help="Herdr binding for the browser view (default: alt+t)")
+                          help="Herdr binding for the browser view (default: prefix+ctrl+t)")
     shortcut.add_argument("--no-key", action="store_true",
                           help="Install without a keyboard shortcut")
     sub.add_parser("web-start", help="Start/reuse the session's local browser service")

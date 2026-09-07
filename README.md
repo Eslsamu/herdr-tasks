@@ -17,7 +17,7 @@ Herdr Tasks is a small local-first plugin for coordinating work across long-runn
 Inside a named Herdr session:
 
 ```sh
-herdr plugin install Eslsamu/herdr-tasks --ref v0.3.2
+herdr plugin install Eslsamu/herdr-tasks --ref v0.3.3
 herdr plugin action invoke setup --plugin herdr-tasks
 ```
 
@@ -29,7 +29,7 @@ While it is working, add a follow-up without stopping the current task:
 
 > Keep going. Add “Review the result” for later and do not abandon your current task.
 
-Press **Option+T** on macOS or **Alt+T** on Linux from the space you want to inspect. The agent owns the queue; the browser is a read-only live view. See [Install](#install) and [Start a queue](#start-a-queue) for the complete setup and operating model.
+Press **Ctrl+B**, release both keys, then press **Ctrl+T** from the space you want to inspect. The agent owns the queue; the browser is a read-only live view. See [Install](#install) and [Start a queue](#start-a-queue) for the complete setup and operating model.
 
 ## Why it exists
 
@@ -71,7 +71,7 @@ Requirements:
 Inside a named Herdr session:
 
 ```sh
-herdr plugin install Eslsamu/herdr-tasks --ref v0.3.2
+herdr plugin install Eslsamu/herdr-tasks --ref v0.3.3
 herdr plugin action invoke setup --plugin herdr-tasks
 ```
 
@@ -80,22 +80,20 @@ Setup:
 - links `herdr-tasks` into `~/.local/bin`;
 - installs the agent skill at `~/.codex/skills/herdr-tasks`;
 - adds the live active-space summary to Herdr's tab bar;
-- binds `alt+t`, displayed as **Option+T** on macOS and **Alt+T** on Linux, to the active space's browser queue;
+- binds `prefix+ctrl+t`—**Ctrl+B**, then **Ctrl+T** with Herdr's default prefix—to the active space's browser queue;
 - starts local viewers for queues already linked to the session;
 - preserves unrelated Herdr configuration and writes a backup before changing it.
 
-If `alt+t` is already bound, setup leaves the existing binding untouched and prints the command fallback. Herdr's sidebar context menu does not list plugin actions, so use the shortcut or run `herdr-tasks open` inside the desired space.
+If `prefix+ctrl+t` is already bound, setup leaves the existing binding untouched and prints the command fallback. Herdr's sidebar context menu does not list plugin actions, so use the shortcut or run `herdr-tasks open` inside the desired space.
 
 To choose another binding or install without one:
 
 ```sh
-herdr-tasks setup --key prefix+t
+herdr-tasks setup --key prefix+ctrl+g
 herdr-tasks setup --no-key
 ```
 
-Herdr names the modifier `alt` on both supported operating systems; macOS keyboards label it Option. The generated configuration is exercised in CI on macOS and Ubuntu. Windows is not claimed as supported because the current plugin launcher and optional terminal viewer require POSIX shell and curses.
-
-The terminal must forward Option/Alt as an Alt or Meta modifier. In macOS Terminal.app, enable **Use Option as Meta key** for the profile running Herdr; otherwise Option+T produces `†` before Herdr can see the shortcut. Other terminal emulators have an equivalent Option/Alt setting.
+The generated configuration is exercised in CI on macOS and Ubuntu. The prefix sequence avoids terminal-specific Option/Alt handling; it follows a configurable Herdr prefix rather than relying on the terminal to emit a Meta modifier. Windows is not claimed as supported because the current plugin launcher and optional terminal viewer require POSIX shell and curses.
 
 ### Local checkout
 
