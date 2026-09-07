@@ -8,9 +8,9 @@
 
 Herdr Tasks is a small local-first plugin for coordinating work across long-running agent conversations. Agents capture requests, own tasks, record blockers, and pull the next ready item. Humans get a live summary in Herdr and a clean, read-only queue in their browser.
 
-[![Watch the 24-second Herdr Tasks demo](docs/assets/herdr-tasks-demo-poster.png)](docs/assets/herdr-tasks-demo.mp4)
+![Animated demo: an agent adds follow-up work, the Herdr summary updates, and the space queue tracks progress.](docs/assets/herdr-tasks-demo.gif)
 
-[Watch MP4](docs/assets/herdr-tasks-demo.mp4) · [Watch WebM](docs/assets/herdr-tasks-demo.webm) · 24 seconds · silent · synthetic data
+*24-second demo using synthetic data.*
 
 ## Try it in two minutes
 
