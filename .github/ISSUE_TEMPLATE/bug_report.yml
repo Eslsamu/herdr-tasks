@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible Herdr Tasks problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a problem. Do not include task contents, capability URLs, credentials, or durable conversation IDs.
+  - type: input
+    id: version
+    attributes:
+      label: Herdr Tasks version
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: herdr
+    attributes:
+      label: Herdr version
+      placeholder: 0.8.2
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior with sanitized examples.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use a disposable queue and generic names where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove task text, paths, tokens, socket names, and conversation IDs before pasting.
+      render: shell

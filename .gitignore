@@ -1,4 +1,13 @@
 __pycache__/
-*.pyc
+*.py[cod]
 *.db*
+*.sqlite*
+*.log
+*.lock
+*.sock
+????????????????.json
+.*.ready
+.env
+.env.*
+!.env.example
 .DS_Store

@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a focused improvement to Herdr Tasks
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the idea. Use generic examples and do not include task contents, capability URLs, credentials, or durable conversation IDs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the workflow friction, not private project details.
+      placeholder: When several agents share a space, I need...
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Explain what a successful, minimal solution would enable.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Note any current workaround or simpler alternative.

@@ -2,126 +2,196 @@
 
 **Talk to your agents. Watch the work. Don't manage cards.**
 
-A small Herdr plugin for people who already work with several long-running agent conversations. Agents own a shared task board, record new requests, choose what comes next, and keep the status current. You get an always-visible Herdr summary and a read-only local browser overview.
+[![Tests](https://github.com/Eslsamu/herdr-tasks/actions/workflows/test.yml/badge.svg)](https://github.com/Eslsamu/herdr-tasks/actions/workflows/test.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-2f6f5e.svg)](LICENSE)
+[![Herdr 0.8.2+](https://img.shields.io/badge/Herdr-0.8.2%2B-4d6b63.svg)](https://herdr.dev)
 
-The full view is one calm vertical ledger: **Now**, **Waiting**, **Next**, and collapsed **Finished** history. Click any task to expand its brief and latest update.
+Herdr Tasks is a small local-first plugin for coordinating work across long-running agent conversations. Agents capture requests, own tasks, record blockers, and pull the next ready item. Humans get a live summary in Herdr and a clean, read-only queue in their browser.
 
-There is no remote service, model API, telemetry, external account, or Python package dependency. A small loopback-only server exposes exactly one space queue behind an opaque local URL; it never accepts writes. Task data stays on your machine. The plugin works with existing conversations and does not start, stop, fork, resume, or replace them.
+![Herdr Tasks browser queue showing generic demo work](docs/assets/queue-desktop.png)
+
+## Why it exists
+
+When several agents work in parallel, a normal Kanban board creates another interface for the human to maintain. Herdr Tasks inverts that model:
+
+- You keep talking to agents in their existing threads.
+- Agents maintain the shared queue as part of their work.
+- Each Herdr space maps to one queue.
+- The browser view is for awareness, not task administration.
+- No existing agent is started, stopped, forked, resumed, or replaced.
+
+## What you get
+
+| Surface | Purpose |
+| --- | --- |
+| Herdr top bar | Always-visible current task and queue counts for the active space |
+| Local browser | Full **Now**, **Waiting**, **Next**, and collapsed **Finished** ledger |
+| Agent CLI | Atomic claims, ownership, priorities, dependencies, notes, and outcomes |
+| Codex skill | A workflow that teaches agents to maintain the queue themselves |
+| Terminal fallback | Optional compact split for environments where a browser is undesirable |
+
+The full view updates every two seconds while preserving expanded tasks, keyboard focus, and scroll position.
+
+<p align="center">
+  <img src="docs/assets/queue-mobile.png" width="390" alt="Herdr Tasks responsive mobile queue using generic demo data">
+</p>
 
 ## Install
 
-Requires macOS/Linux, **Herdr 0.8.2+**, and **Python 3.10+ with curses**. The included workflow is for Codex; the CLI identifies agents through Herdr's durable session IDs.
+Requirements:
 
-Inside Herdr:
+- macOS or Linux
+- [Herdr](https://herdr.dev) 0.8.2 or newer
+- Python 3.10 or newer with `sqlite3` and `curses`
+- Codex for the included agent workflow; the queue itself has no model API dependency
+
+Inside a named Herdr session:
 
 ```sh
 herdr plugin install Eslsamu/herdr-tasks --ref v0.3.0
 herdr plugin action invoke setup --plugin herdr-tasks
 ```
 
-Setup links the CLI into `~/.local/bin`, installs a Codex skill into `~/.codex/skills/herdr-tasks`, adds a live current-space summary to Herdr's top tab bar, and starts local viewers for linked spaces. It backs up your config and preserves unrelated settings. **No shortcut is assigned by default.** Use Herdr's plugin action **Tasks: open space queue in browser**, or `herdr-tasks open`.
+Setup:
 
-**The preview is visible without opening anything or prompting an agent.** It shows the current task (or the next/waiting task when idle) and queue counts, and follows the selected space. The browser viewer is a separate read-only tab that refreshes every two seconds. Setup pins its working Python interpreter because Herdr's server does not use your terminal's login-shell PATH. Re-run setup if that interpreter or the checkout moves. Status reads only the server's session and active-space context; it does not require an agent pane or run agent commands.
+- links `herdr-tasks` into `~/.local/bin`;
+- installs the agent skill at `~/.codex/skills/herdr-tasks`;
+- adds the live active-space summary to Herdr's tab bar;
+- starts local viewers for queues already linked to the session;
+- preserves unrelated Herdr configuration and writes a backup before changing it.
 
-For an optional shortcut, run `herdr-tasks setup --key alt+t` with a binding your terminal actually delivers. This is an example, not a universal Mac keyboard recommendation. Configured conflicts are rejected. Running setup without `--key` removes the plugin's previous shortcut, including the old Ctrl+B / Shift+T binding.
-
-If your config already defines `tab_bar_right` as an inline array, setup preserves it and prints the exact entry to add, including the working interpreter's absolute path. Existing array-of-table entries coexist automatically. Herdr's status text is not clickable and may be hidden when the tab row is too narrow.
-
-If `~/.local/bin` is not on your PATH, use `~/.local/bin/herdr-tasks` or add that directory to your normal shell configuration. Existing Codex threads can read `herdr-tasks skill` immediately; new threads can discover the installed skill normally.
-
-For a local checkout, substitute the install command with:
+No keyboard shortcut is assigned automatically. Open the current space through Herdr's action menu with **Tasks: open space queue in browser**. To add an explicit shortcut later:
 
 ```sh
-herdr plugin link /absolute/path/to/herdr-tasks --enabled
+herdr-tasks setup --key alt+t
 ```
 
-## Use it
+Choose a binding your terminal actually delivers and that does not conflict with your existing Herdr or agent shortcuts.
 
-Tell an agent:
+### Local checkout
 
-> Read `herdr-tasks skill`, join the "Product" board, and maintain it for the work I give you. Record later requests without abandoning your current task. Keep the board current and work through the authorized queue.
+```sh
+git clone https://github.com/Eslsamu/herdr-tasks.git
+cd herdr-tasks
+herdr plugin link "$PWD" --enabled
+herdr plugin action invoke setup --plugin herdr-tasks
+```
 
-Joining links that queue to the agent's Herdr space. Give the same queue name to other agents in that space; different spaces get different queues. Bindings use session socket and workspace ID, so renaming a space does not change the binding. Then talk normally:
+## Start a queue
+
+Tell an agent in the space:
+
+> Read `herdr-tasks skill`, join the `ProjectName` board, and maintain it for the work I give you. Record later requests without abandoning your current task. Keep the board current and work through the authorized queue.
+
+Or run the initial commands in that agent pane:
+
+```sh
+herdr-tasks join ProjectName
+herdr-tasks list
+```
+
+Joining links the queue to that agent's current Herdr space. Other agents in the same space join the same board name. Renaming the Herdr space later does not break the binding because it uses the stable workspace ID.
+
+Then talk normally:
 
 > After your current task, fix CSV export and add saved filters.
 
-The agent records and orders those requests. You only open the viewer. The action opens the current space's local URL in your default browser without changing Herdr's panes. Reopening reuses the same space-specific server and URL. Keep or bookmark the tab if you want the full queue permanently available.
+The agent records and orders the requests. You do not need to create or move cards.
 
-**Click a task** or use **Tab then Enter/Space** to expand its description, latest update, dependency state, priority, and timestamp. Finished/cancelled work is collapsed by default. The layout stays one ordered list at every width, including mobile. The page preserves expanded rows and scroll position across live refreshes.
+## Queue rules
 
-For a terminal-only fallback, use the plugin action **Tasks: open terminal fallback** or `herdr-tasks pane`. It creates the former compact split below the focused terminal without replacing any agent PTY. Close that fallback with its **[Close]** control, **q**, or **Esc**.
-
-An operator can enroll an existing agent without typing into its terminal:
-
-```sh
-herdr-tasks --agent your-agent-name join Product
-```
-
-Enrollment links membership and the space queue; it does not send a prompt or start work. The agent still needs the workflow instruction to maintain the board.
-
-Link a pre-0.2.0 queue without changing its membership or tasks using `herdr-tasks --board Product bind-space --workspace w1`. Existing bindings are not silently overwritten. A queue can be linked to only one space; cross-space coordination stays explicit through `--board`. No Herdr binary modification or agent restart is required.
-
-## How agents coordinate
-
-- A vertical queue: current work, waiting items, next requests, and collapsed finished history. Task states remain queued, doing, blocked, done, or cancelled.
-- Each task has one owner. Claiming is atomic; two agents cannot claim the same task.
-- One doing task per owner per board. `next` returns existing active work instead of starting another task.
-- Priority 0 is highest; ties run oldest first. Optional dependencies must finish before a task starts.
-- Only the owner can change active work or mark its outcome. Queued work can be reassigned by teammates.
-- Completing, blocking, or cancelling requires an explanatory note. Claims and changes are recorded in history.
-- Membership and ownership follow the conversation ID, not its pane number. Resume retains ownership; forks explicitly join as new members.
-
-This is cooperative local coordination, **not a security boundary** between programs running as the same OS user. Explicit `--agent` targets are available to authorized operators. The plugin does not infer what a model is doing or verify its claims of completion.
-
-### Deliberate limits
-
-There are no hooks or background scheduler. A new request appears when the agent processes it at a safe boundary, not the instant you type it. The workflow tells an agent to continue through its authorized queue, but this plugin cannot wake an idle/offline thread, bypass usage limits, or guarantee model compliance. Assigning a task to an idle teammate does not automatically send that teammate a prompt.
-
-Dependencies currently refer to existing tasks on the same board. Blocked tasks require explicit requeueing; cancelling a prerequisite does not silently release dependent tasks.
+- Tasks are `queued`, `doing`, `blocked`, `done`, or `cancelled`.
+- Every task has at most one owner, and each owner has at most one `doing` task per board.
+- Claims are atomic, so two agents cannot claim the same work.
+- Priority `0` is highest; equal-priority tasks run oldest first.
+- Optional dependencies must be done before a task can start.
+- Completing, blocking, or cancelling work requires an explanatory note.
+- Ownership follows the durable conversation ID: resume retains it, while a fork must join explicitly.
+- Assigning work does not wake an idle agent or bypass normal approvals, usage limits, or credential handoffs.
 
 ## CLI
 
-Commands print JSON except the viewer and skill. Global options precede the command.
+Global options go before the command: `herdr-tasks --board ProjectName list`.
 
 ```sh
-herdr-tasks join Product
+# Queue membership and inspection
+herdr-tasks join ProjectName
 herdr-tasks list
+herdr-tasks show 12
+
+# Agent-owned task management
 herdr-tasks add "Fix CSV export" --detail "Preserve quoted commas and Unicode."
-herdr-tasks add "Write launch copy" --owner gtm --priority 4 --after 1
+herdr-tasks add "Write launch copy" --owner "Agent Two" --priority 4 --after 12
 herdr-tasks next
-herdr-tasks update 1 --note "Regression reproduced; testing the fix."
-herdr-tasks update 1 --status done --note "Quoted fields fixed; regression tests pass."
-herdr-tasks show 1
-herdr-tasks --board Product list
-herdr-tasks --board Product view
-herdr-tasks open
-herdr-tasks pane
-herdr-tasks --help
+herdr-tasks start 12
+herdr-tasks update 12 --note "Reproduced; testing the parser fix."
+herdr-tasks update 12 --status done --note "Quoted fields fixed; regression tests pass."
+herdr-tasks update 13 --status blocked --note "Waiting for the domain choice."
+herdr-tasks update 13 --status queued --note "Domain chosen; ready to continue."
+
+# Human views
+herdr-tasks open       # local browser for the current space
+herdr-tasks pane       # optional compact terminal split
 ```
 
-Read-only `boards`, explicit-board `list`, `show`, and terminal `view` also work outside Herdr. Task writes require a Herdr agent with a reported durable session ID. Default commands use the calling agent's space binding, or legacy conversation membership when no binding exists. Use `--board NAME` for explicit selection. Operator integration commands such as `bind-space`, `open`, and `pane` require Herdr context but do not pretend to be an agent.
+Read-only `boards`, explicit-board `list`, `show`, and terminal `view` also work outside Herdr. Writes require a Herdr agent with a reported durable conversation ID. `--agent NAME` is available for explicit operator enrollment and coordination; it does not silently transfer another agent's active work.
 
-## Data and removal
+## Local and read-only by design
 
-Default storage: `~/.local/state/herdr-tasks/tasks.db` (or `$XDG_STATE_HOME/herdr-tasks/tasks.db`). Set `HERDR_TASKS_DB` to override it. SQLite WAL handles concurrent readers/writers. Don't copy only the `.db` file during active writes: use SQLite's backup facility, or export a board snapshot with `herdr-tasks --board Product list`.
+The browser viewer is served only on `127.0.0.1`. Each URL contains a random capability token and is pinned server-side to exactly one `(session, workspace, board)` binding. Query parameters cannot select another queue.
 
-Task contents can be sensitive. Do not include credentials or unrelated private conversation content. The database is outside this repository and is never uploaded by the plugin.
+The HTTP surface:
 
-To remove the integration inside Herdr:
+- accepts only `GET` and `HEAD`;
+- exposes a small display-only data shape without member actor IDs or durable conversation IDs;
+- rejects foreign `Host` headers and all mutation methods;
+- sends no CORS permission and uses a restrictive Content Security Policy;
+- uses no external scripts, fonts, analytics, telemetry, or accounts.
+
+This protects against accidental browser exposure, but it is not a security boundary between programs running as the same operating-system user. Treat task descriptions as potentially sensitive and do not store credentials or unrelated private conversation content in them.
+
+## Data
+
+The default database is:
+
+```text
+~/.local/state/herdr-tasks/tasks.db
+```
+
+Set `HERDR_TASKS_DB` to use another path. SQLite WAL supports concurrent agent writers and browser readers. Task data lives outside the repository and is never uploaded by the plugin.
+
+When backing up an active database, use SQLite's backup facility or export a board with `herdr-tasks --board ProjectName list`; do not copy only the main `.db` file while WAL writes are active.
+
+## Deliberate limits
+
+- There are no prompt hooks and no background model execution.
+- A request enters the queue when an agent processes the message at a safe tool boundary, not at the instant it is typed.
+- The plugin cannot wake stopped threads, bypass usage limits, or guarantee model compliance.
+- Blocked tasks require an explicit requeue after their blocker is resolved.
+- Dependencies refer only to existing tasks on the same board.
+
+## Remove
+
+Inside Herdr:
 
 ```sh
 herdr plugin action invoke uninstall --plugin herdr-tasks
 herdr plugin uninstall herdr-tasks
 ```
 
-For a linked local checkout, use `herdr plugin unlink herdr-tasks` as the second command. Cleanup stops this session's verified loopback viewers and removes only its own CLI/skill links and marked status/shortcut block. **Task data is kept.** No conversations are touched.
+For a linked checkout, use `herdr plugin unlink herdr-tasks` as the second command. Cleanup stops verified loopback viewers for the current session, removes only the plugin's own CLI/skill links and managed config block, and keeps all task data. It does not touch agent conversations.
 
 ## Develop
 
+The runtime uses only the Python standard library and dependency-free HTML, CSS, and JavaScript.
+
 ```sh
 python3 -m unittest -v
+sh -n run.sh
 ```
 
-One standard-library Python program, SQLite, a small dependency-free browser view, curses fallback, and a Herdr manifest. The tests cover ownership, concurrent claims, dependencies, resume/fork identity, browser isolation, and configuration integration. No package installation required.
+The test suite covers queue ownership, concurrent claims, dependencies, resume/fork identity, configuration safety, terminal rendering, browser DTO privacy, immutable space routing, HTTP method/host/token rejection, live revisions, viewer restart/reuse, and installed CLI execution. CI runs on macOS and Linux with Python 3.10 and 3.14.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull-request guidance. Please report security issues according to [SECURITY.md](SECURITY.md).
 
 MIT licensed.
