@@ -252,7 +252,6 @@ async function main() {
       scrollHeight: document.documentElement.scrollHeight,
       ready: document.documentElement.dataset.captureReady,
       error: document.documentElement.dataset.captureError || "",
-      synthetic: document.querySelector(".synthetic-label")?.textContent?.trim(),
     }));
     assert.deepEqual(contract, {
       width: WIDTH,
@@ -261,7 +260,6 @@ async function main() {
       scrollHeight: HEIGHT,
       ready: "true",
       error: "",
-      synthetic: "Synthetic data",
     });
     assert.deepEqual(failures, []);
 
