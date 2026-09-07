@@ -1,27 +1,35 @@
 id = "herdr-tasks"
 name = "Tasks"
-version = "0.2.0"
-description = "An agent-owned work queue with a compact native pane and space summary."
+version = "0.3.0"
+description = "An agent-owned work queue with a live local viewer and space summary."
 min_herdr_version = "0.8.2"
 platforms = ["macos", "linux"]
 
+[[startup]]
+command = ["sh", "run.sh", "web-start"]
+
 [[panes]]
 id = "board"
-title = "Tasks · click a task for details"
+title = "Tasks · terminal fallback"
 placement = "split"
-command = ["python3", "herdr_tasks.py", "view"]
+command = ["sh", "run.sh", "view"]
 
 [[actions]]
 id = "open"
-title = "Tasks: open space queue"
-command = ["python3", "herdr_tasks.py", "open"]
+title = "Tasks: open space queue in browser"
+command = ["sh", "run.sh", "open"]
+
+[[actions]]
+id = "pane"
+title = "Tasks: open terminal fallback"
+command = ["sh", "run.sh", "pane"]
 
 [[actions]]
 id = "setup"
 title = "Tasks: install CLI and space summary"
-command = ["python3", "herdr_tasks.py", "setup"]
+command = ["sh", "run.sh", "setup"]
 
 [[actions]]
 id = "uninstall"
 title = "Tasks: remove integration (keep task data)"
-command = ["python3", "herdr_tasks.py", "uninstall"]
+command = ["sh", "run.sh", "uninstall"]

@@ -1,4 +1,7 @@
 import concurrent.futures
+import http.client
+from http.server import ThreadingHTTPServer
+import json
 import os
 import fcntl
 from pathlib import Path
@@ -290,7 +293,209 @@ class QueueTests(unittest.TestCase):
         self.assertLess(measured,len(paragraph)*3)
 
 
+class BrowserTests(unittest.TestCase):
+    TOKEN = "browser-contract-token-0123456789"
+    SAFE_TASK_FIELDS = {
+        "id", "title", "detail", "status", "owner_name", "priority",
+        "note", "created", "updated", "waiting_on",
+    }
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.servers = []
+        self.path = Path(self.temp.name)/"tasks.db"
+        self.session = str(Path(self.temp.name).resolve()/"herdr.sock")
+        self.store = app.Store(self.path)
+        self.board = self.store.join("ProjectName", A)["board"]
+        self.store.join("ProjectName", B)
+        self.store.bind_space(self.board, self.session, "w1")
+        self.task = self.store.add(
+            self.board, A, "Ship </script><img src=x onerror=alert(1)>",
+            detail="Keep this as browser text.",
+        )["id"]
+
+        self.other = self.store.join("OtherProjectName", A)["board"]
+        self.store.bind_space(self.other, self.session, "w2")
+        self.store.add(self.other, A, "Other-space task")
+        self.live = {
+            "focused_workspace_id": "w2",
+            "workspaces": [
+                {"workspace_id": "w1", "label": "SpaceName"},
+                {"workspace_id": "w2", "label": "OtherSpaceName"},
+            ],
+        }
+
+    def tearDown(self):
+        for server, thread in self.servers:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.store.close()
+        self.temp.cleanup()
+
+    def payload(self):
+        return app.browser_payload(
+            store=self.store,
+            session=self.session,
+            workspace="w1",
+            board=self.board,
+            live=self.live,
+        )
+
+    def start_server(self):
+        handler = app.make_web_handler(
+            session=self.session,
+            database=self.path,
+            workspace="w1",
+            board=self.board,
+            token=self.TOKEN,
+            snapshot_reader=lambda _session: self.live,
+        )
+        server = ThreadingHTTPServer((app.WEB_HOST, 0), handler)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.servers.append((server, thread))
+        return server
+
+    def request(self, server, method, path, host=None, body=None):
+        port = server.server_address[1]
+        connection = http.client.HTTPConnection(app.WEB_HOST, port, timeout=2)
+        headers = {"Host": host or f"{app.WEB_HOST}:{port}"}
+        try:
+            connection.request(method, path, body=body, headers=headers)
+            response = connection.getresponse()
+            content = response.read()
+            return response.status, {key.lower(): value for key, value in response.getheaders()}, content
+        finally:
+            connection.close()
+
+    def api_path(self, suffix="/api/state"):
+        return f"/v/{self.TOKEN}{suffix}"
+
+    def test_browser_payload_is_a_sanitized_display_dto(self):
+        payload = self.payload()
+        self.assertEqual(set(payload), {
+            "workspace", "workspace_label", "snapshot", "counts", "served_at", "revision",
+        })
+        self.assertEqual(payload["workspace"], "w1")
+        self.assertEqual(payload["snapshot"]["board"], {"name": "ProjectName"})
+        self.assertEqual(set(payload["snapshot"]), {"board", "tasks"})
+        self.assertEqual(set(payload["snapshot"]["tasks"][0]), self.SAFE_TASK_FIELDS)
+        self.assertEqual(payload["snapshot"]["tasks"][0]["title"],
+                         "Ship </script><img src=x onerror=alert(1)>")
+        serialized = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn(A["id"], serialized)
+        self.assertNotIn(B["id"], serialized)
+        self.assertNotIn("Other-space task", serialized)
+        self.assertNotIn('"members"', serialized)
+        self.assertNotIn('"actor"', serialized)
+        self.assertNotIn('"owner"', serialized)
+
+    def test_handler_pins_board_and_ignores_query_workspace_switches(self):
+        server = self.start_server()
+        status, _, content = self.request(
+            server, "GET", self.api_path("/api/state?workspace=w2&board="+str(self.other)),
+        )
+        self.assertEqual(status, 200)
+        payload = json.loads(content)
+        self.assertEqual(payload["workspace"], "w1")
+        self.assertEqual(payload["snapshot"]["board"]["name"], "ProjectName")
+        self.assertNotIn("Other-space task", content.decode())
+
+        # Administrative rebinding after launch must not change this URL's scope.
+        self.store.db.execute("DELETE FROM spaces WHERE session=? AND workspace=?", (self.session, "w2"))
+        self.store.db.execute("UPDATE spaces SET board=? WHERE session=? AND workspace=?",
+                              (self.other, self.session, "w1"))
+        status, _, content = self.request(server, "GET", self.api_path())
+        self.assertEqual(status, 503)
+        payload = json.loads(content)
+        self.assertIn("reopen", payload["error"].lower())
+        self.assertNotIn("Other-space task", content.decode())
+
+    def test_http_rejects_wrong_token_host_and_mutation(self):
+        server = self.start_server()
+        port = server.server_address[1]
+
+        status, _, content = self.request(server, "GET", "/v/wrong-token/api/state")
+        self.assertEqual(status, 404)
+        self.assertNotIn(b"Ship", content)
+
+        status, _, content = self.request(
+            server, "GET", self.api_path(), host=f"queue.example:{port}",
+        )
+        self.assertEqual(status, 421)
+        self.assertNotIn(b"Ship", content)
+
+        before = self.store.show(self.task)
+        for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS"):
+            with self.subTest(method=method):
+                status, headers, content = self.request(
+                    server, method, self.api_path(), body=b'{"status":"done"}',
+                )
+                self.assertEqual(status, 405)
+                self.assertNotIn("access-control-allow-origin", headers)
+                self.assertIn(b"Read-only", content)
+        self.assertEqual(self.store.show(self.task), before)
+
+    def test_revision_is_stable_until_queue_content_changes(self):
+        with patch.object(app.time, "time", return_value=100):
+            first = self.payload()
+        with patch.object(app.time, "time", return_value=200):
+            second = self.payload()
+        self.assertNotEqual(first["served_at"], second["served_at"])
+        self.assertEqual(first["revision"], second["revision"])
+        self.assertRegex(first["revision"], r"^[0-9a-f]{16}$")
+
+        self.store.update(self.task, A, note="Changed after the first poll")
+        with patch.object(app.time, "time", return_value=300):
+            changed = self.payload()
+        self.assertNotEqual(first["revision"], changed["revision"])
+
+
 class IntegrationTests(unittest.TestCase):
+    def test_local_server_binds_reuses_and_stops_for_one_space(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root/"tasks.db"
+            session = str(root.resolve()/"herdr.sock")
+            store = app.Store(path)
+            board = store.join("Browser", A)["board"]
+            store.bind_space(board, session, "w1")
+            store.add(board, A, "Visible only here")
+            store.close()
+            env = {"HERDR_TASKS_WEB_STATE_DIR":str(root/"web-state")}
+            first = None
+            state = None
+            with patch.dict(os.environ, env, clear=False):
+                try:
+                    first = app.ensure_web_server(session, "w1", path)
+                    second = app.ensure_web_server(session, "w1", path)
+                    self.assertFalse(first["reused"])
+                    self.assertTrue(second["reused"])
+                    self.assertEqual(first["url"], second["url"])
+                    state_path, _, _ = app.web_state_paths(session, "w1")
+                    self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
+                    state = app.read_web_state(state_path)
+                    self.assertEqual(app.web_health(first["port"], session, "w1", board,
+                                                    path, state["token"])["pid"], first["pid"])
+                    stale = dict(state, build_id="stale-build")
+                    app.atomic_json(state_path, stale)
+                    restarted = app.ensure_web_server(session, "w1", path)
+                    self.assertFalse(restarted["reused"])
+                    self.assertEqual(restarted["url"], first["url"])
+                    self.assertNotEqual(restarted["pid"], first["pid"])
+                    state = app.read_web_state(state_path)
+                finally:
+                    if first and state:
+                        self.assertTrue(app.stop_web_server(session, "w1"))
+                        deadline = time.monotonic()+2
+                        while time.monotonic() < deadline and app.web_health(
+                                first["port"], session, "w1", board, path, state["token"]):
+                            time.sleep(0.05)
+                        self.assertIsNone(app.web_health(first["port"], session, "w1", board,
+                                                        path, state["token"]))
+
     def test_status_runs_in_server_environment_without_a_pane_or_login_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/"tasks.db"
@@ -361,6 +566,9 @@ class IntegrationTests(unittest.TestCase):
             config.write_text(original)
             data = root/"tasks.db"
             data.write_bytes(b"preserve me")
+            legacy_cli = root/".local/bin/herdr-tasks"
+            legacy_cli.parent.mkdir(parents=True)
+            legacy_cli.symlink_to(app.ROOT/"herdr_tasks.py")
             with patch.object(Path, "home", return_value=root), patch.dict(os.environ, {
                 "HERDR_ENV": "1", "HERDR_CONFIG_PATH": str(config), "HERDR_TASKS_DB": str(data)
             }), patch.object(app, "herdr", return_value="ok"):
@@ -373,6 +581,9 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(once.count('[[ui.tab_bar_right]]'), 1)
                 self.assertIn(app.shlex.join([sys.executable,str(app.ROOT/"herdr_tasks.py"),"status"]),once)
                 self.assertTrue((root/".local/bin/herdr-tasks").is_symlink())
+                self.assertEqual((root/".local/bin/herdr-tasks").resolve(), app.ROOT/"run.sh")
+                self.assertEqual(subprocess.check_output(
+                    [str(root/".local/bin/herdr-tasks"), "--version"], text=True).strip(), app.VERSION)
                 app.setup(remove=True)
                 self.assertEqual(config.read_text().strip(), original.strip())
                 self.assertFalse((root/".local/bin/herdr-tasks").exists())

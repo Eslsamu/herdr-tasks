@@ -2,23 +2,33 @@
 """Agent-owned boards in Herdr. Python 3.10+, standard library only."""
 import argparse
 import curses
+import fcntl
+import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
+import urllib.parse
+import urllib.request
 
 from queue_view import ui, counts, clip
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 ROOT = Path(__file__).resolve().parent
+WEB_ROOT = ROOT / "web"
+WEB_HOST = "127.0.0.1"
 STATUSES = ("queued", "doing", "blocked", "done", "cancelled")
 MARK_START = "# herdr-tasks:begin"
 MARK_END = "# herdr-tasks:end"
@@ -58,6 +68,12 @@ def session_key():
     return str(Path(os.environ["HERDR_SOCKET_PATH"]).resolve())
 
 
+def socket_context():
+    path = os.environ.get("HERDR_SOCKET_PATH", "")
+    require(path and Path(path).is_absolute(), "No Herdr session context")
+    return str(Path(path).resolve())
+
+
 def status_context():
     # Herdr runs status commands on its server, not inside a managed pane.
     # HERDR_ENV is deliberately absent there; only these active-context values
@@ -68,16 +84,20 @@ def status_context():
     return str(Path(path).resolve()), workspace
 
 
-def rpc(method, params):
-    """Only needed for split ratios, not exposed by this Herdr CLI version."""
+def socket_rpc(session, method, params, timeout=10):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(10)
-        connection.connect(session_key())
+        connection.settimeout(timeout)
+        connection.connect(session)
         connection.sendall((json.dumps({"id":"herdr-tasks", "method":method, "params":params})+"\n").encode())
         with connection.makefile("r") as stream:
             result = json.loads(stream.readline())
     require("error" not in result, str(result.get("error")))
     return result["result"]
+
+
+def rpc(method, params):
+    """Only needed for split ratios, not exposed by this Herdr CLI version."""
+    return socket_rpc(session_key(), method, params)
 
 
 def identity(target=None):
@@ -182,6 +202,13 @@ class Store:
     def space_board(self, session, workspace):
         row = self.db.execute("SELECT board FROM spaces WHERE session=? AND workspace=?", (session,workspace)).fetchone()
         return row[0] if row else None
+
+    def space_bindings(self, session):
+        return [dict(row) for row in self.db.execute("""
+          SELECT s.workspace,s.board,b.name AS board_name
+          FROM spaces s JOIN boards b ON b.id=s.board
+          WHERE s.session=? ORDER BY s.workspace
+        """, (session,))]
 
     def viewer(self, session, tab):
         row = self.db.execute("SELECT pane,board FROM viewers WHERE session=? AND tab=?", (session,tab)).fetchone()
@@ -345,6 +372,7 @@ def setup(remove=False, key=None):
     require(os.environ.get("HERDR_ENV") == "1", "Run setup inside Herdr")
     dest = Path.home()/".local/bin/herdr-tasks"
     skill = Path.home()/".codex/skills/herdr-tasks"
+    cli_target = ROOT/"run.sh"
     config = config_path()
     original = config.read_text() if config.exists() else ""
     require(original.count(MARK_START) == original.count(MARK_END) and original.count(MARK_START) <= 1,
@@ -354,14 +382,16 @@ def setup(remove=False, key=None):
     if remove:
         replacement = base
     else:
-        for link, target in ((dest, ROOT/"herdr_tasks.py"), (skill, ROOT/"skill")):
-            require(not link.exists() and not link.is_symlink() or link.is_symlink() and link.resolve() == target,
+        for link, target, legacy in ((dest, cli_target, {ROOT/"herdr_tasks.py"}),
+                                     (skill, ROOT/"skill", set())):
+            require(not link.exists() and not link.is_symlink() or
+                    link.is_symlink() and link.resolve() in {target,*legacy},
                     f"Refusing to replace an existing installation: {link}")
         binding = ""
         if key:
             require(re.fullmatch(r"[a-z0-9+_-]+",key), "Use a Herdr key name such as alt+t")
             require(key.lower() not in base.lower(), "That key is already configured; choose another or omit --key")
-            binding = '\n[[keys.command]]\nkey = '+json.dumps(key)+'\ntype = "shell"\ncommand = "herdr plugin action invoke open --plugin herdr-tasks"\ndescription = "Open space task queue"\n'
+            binding = '\n[[keys.command]]\nkey = '+json.dumps(key)+'\ntype = "plugin_action"\ncommand = "herdr-tasks.open"\ndescription = "Open space task queue in browser"\n'
         # Existing inline arrays cannot be extended with TOML array-of-table syntax.
         # Preserve them and explain the one manual entry instead of rewriting config.
         inline = re.search(r'(?m)^\s*(?:ui\.)?tab_bar_right\s*=',base)
@@ -389,16 +419,19 @@ def setup(remove=False, key=None):
             raise
         herdr("server", "reload-config")
     # Install/remove links only after config validation succeeds.
-    for link, target in ((dest, ROOT/"herdr_tasks.py"), (skill, ROOT/"skill")):
+    for link, target in ((dest, cli_target), (skill, ROOT/"skill")):
         if remove:
-            if link.is_symlink() and link.resolve() == target:
+            if link.is_symlink() and link.resolve() in {target, ROOT/"herdr_tasks.py"}:
                 link.unlink()
         else:
             link.parent.mkdir(parents=True, exist_ok=True)
-            if not link.is_symlink():
+            if link.is_symlink() and link.resolve() != target:
+                link.unlink()
+            if not link.exists() and not link.is_symlink():
                 link.symlink_to(target, target_is_directory=target.is_dir())
     if not remove:
         (ROOT/"herdr_tasks.py").chmod(0o755)
+        cli_target.chmod(0o755)
     return {"cli": str(dest), "skill": str(skill), "removed": remove, "data": str(db_path())}
 
 
@@ -469,6 +502,453 @@ def top_status(store, session, workspace):
     return f"Tasks · {lead} · {n['next']} next · {n['waiting']} waiting"
 
 
+def herdr_snapshot(session):
+    return socket_rpc(session, "session.snapshot", {}, timeout=2)["snapshot"]
+
+
+def browser_payload(store, session, workspace, board=None, live=None, workspace_label=None):
+    """Return the small, read-only DTO for one immutable space binding."""
+    require(isinstance(workspace, str) and 0 < len(workspace) <= 64,
+            "Invalid workspace selector")
+    live = live or {}
+    labels = {item["workspace_id"]: item["label"] for item in live.get("workspaces", [])}
+    binding = next((item for item in store.space_bindings(session)
+                    if item["workspace"] == workspace), None)
+    if board is None:
+        require(binding is not None, "This space no longer has a task queue")
+        board = binding["board"]
+    require(binding is not None and binding["board"] == board,
+            "This space's queue binding changed; reopen the viewer")
+    raw = store.snapshot(board)
+    allowed = ("id", "title", "detail", "status", "owner_name", "priority",
+               "note", "created", "updated", "waiting_on")
+    snapshot = {"board":{"name":raw["board"]["name"]},
+                "tasks":[{key:task.get(key) for key in allowed} for task in raw["tasks"]]}
+    result = {
+        "workspace": workspace,
+        "workspace_label": labels.get(workspace, workspace_label or
+                                      (binding["board_name"] if binding else workspace)),
+        "snapshot": snapshot,
+        "counts": counts(snapshot),
+        "served_at": int(time.time()),
+    }
+    stable = {key:value for key,value in result.items() if key != "served_at"}
+    result["revision"] = hashlib.sha256(json.dumps(stable,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
+    return result
+
+
+def web_state_dir():
+    override = os.environ.get("HERDR_TASKS_WEB_STATE_DIR")
+    return Path(override).expanduser().resolve() if override else db_path().parent / "web"
+
+
+def web_state_paths(session, workspace):
+    key = hashlib.sha256((session+"\0"+workspace).encode()).hexdigest()[:16]
+    root = web_state_dir()
+    return root / f"{key}.json", root / f"{key}.lock", root / f"{key}.log"
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path.parent, 0o700)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(value, stream, ensure_ascii=False, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def web_fingerprint(value):
+    return hashlib.sha256(str(value).encode()).hexdigest()[:16]
+
+
+def web_build_id():
+    digest = hashlib.sha256()
+    for path in (ROOT/"herdr_tasks.py", WEB_ROOT/"index.html",
+                 WEB_ROOT/"styles.css", WEB_ROOT/"app.js"):
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"missing")
+    return digest.hexdigest()[:16]
+
+
+def web_health(port, session, workspace, board, database, token):
+    if not isinstance(port, int) or not isinstance(token, str) or not token:
+        return None
+    try:
+        path = urllib.parse.quote(token, safe="")
+        request = urllib.request.Request(f"http://{WEB_HOST}:{port}/v/{path}/health",
+                                         headers={"Host":f"{WEB_HOST}:{port}"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=0.5) as response:
+            result = json.load(response)
+        expected = {"session_id":web_fingerprint(session),
+                    "workspace_id":web_fingerprint(workspace),
+                    "board":board,
+                    "database_id":web_fingerprint(Path(database).resolve())}
+        return result if response.status == 200 and all(result.get(k) == v for k,v in expected.items()) else None
+    except Exception:
+        return None
+
+
+def read_web_state(path):
+    try:
+        state = json.loads(Path(path).read_text())
+        return state if isinstance(state, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def web_result(state, reused):
+    encoded = urllib.parse.quote(state["token"], safe="")
+    return {"url":f"http://{WEB_HOST}:{state['port']}/v/{encoded}/",
+            "port":state["port"], "pid":state.get("pid"),
+            "workspace":state["workspace"], "board":state["board"], "reused":reused}
+
+
+def terminate_web_state(state):
+    if not state:
+        return False
+    health = web_health(state.get("port"), state.get("session", ""),
+                        state.get("workspace", ""), state.get("board"),
+                        state.get("database", ""), state.get("token", ""))
+    pid = state.get("pid")
+    if health and isinstance(pid, int) and health.get("pid") == pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        return True
+    return False
+
+
+def wait_web_stopped(state, timeout=2):
+    deadline = time.monotonic()+timeout
+    while time.monotonic() < deadline:
+        if not web_health(state.get("port"), state.get("session", ""),
+                          state.get("workspace", ""), state.get("board"),
+                          state.get("database", ""), state.get("token", "")):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def spawn_web_server(session, workspace, board, database, label, token, port, ready_path, log_path):
+    command = [sys.executable, str(ROOT/"herdr_tasks.py"), "serve",
+               "--session", session, "--workspace", workspace, "--board", str(board),
+               "--workspace-label", label, "--port", str(port), "--db", str(database),
+               "--token", token, "--ready", str(ready_path)]
+    descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, "ab") as output:
+        return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output,
+                                stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+
+
+def wait_web_ready(process, ready_path, session, workspace, board, database, token, timeout=3):
+    deadline = time.monotonic()+timeout
+    while time.monotonic() < deadline:
+        ready = read_web_state(ready_path)
+        if ready:
+            health = web_health(ready.get("port"), session, workspace, board, database, token)
+            if health and health.get("pid") == process.pid:
+                return ready
+        if process.poll() is not None:
+            break
+        time.sleep(0.05)
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1)
+    return None
+
+
+def ensure_web_server(session, workspace, database=None):
+    require(Path(session).is_absolute(), "Web viewer requires an absolute Herdr socket path")
+    require(isinstance(workspace, str) and workspace, "Choose a Herdr space first")
+    database = Path(database or db_path()).resolve()
+    store = Store(database, readonly=True)
+    try:
+        binding = next((item for item in store.space_bindings(session)
+                        if item["workspace"] == workspace), None)
+    finally:
+        store.close()
+    require(binding is not None, "No queue is linked to this space")
+    board = binding["board"]
+    label = binding["board_name"]
+    try:
+        live = herdr_snapshot(session)
+        label = next((item["label"] for item in live.get("workspaces", [])
+                      if item["workspace_id"] == workspace), label)
+    except (ValueError, OSError, socket.timeout, KeyError, json.JSONDecodeError):
+        pass
+    state_path, lock_path, log_path = web_state_paths(session, workspace)
+    state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(state_path.parent, 0o700)
+    lock_descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(lock_descriptor, "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = read_web_state(state_path)
+        build = web_build_id()
+        same_scope = state and all(state.get(key) == value for key,value in {
+            "session":session, "workspace":workspace, "board":board,
+            "database":str(database)}.items())
+        current = same_scope and all(state.get(key) == value for key,value in {
+            "workspace_label":label, "version":VERSION, "build_id":build}.items())
+        if current and web_health(state.get("port"), session, workspace, board, database,
+                                  state.get("token")):
+            return web_result(state, True)
+        if state:
+            if terminate_web_state(state):
+                wait_web_stopped(state)
+        preferred_port = state.get("port", 0) if same_scope and isinstance(state.get("port"), int) else 0
+        token = state.get("token") if same_scope and isinstance(state.get("token"), str) and len(state["token"]) >= 32 else secrets.token_urlsafe(32)
+        ready_path = state_path.with_name(f".{state_path.stem}.{secrets.token_hex(6)}.ready")
+        ready = None
+        process = None
+        for port in dict.fromkeys((preferred_port, 0)):
+            ready_path.unlink(missing_ok=True)
+            process = spawn_web_server(session, workspace, board, database, label, token,
+                                       port, ready_path, log_path)
+            ready = wait_web_ready(process, ready_path, session, workspace, board,
+                                   database, token)
+            if ready:
+                break
+        ready_path.unlink(missing_ok=True)
+        require(ready is not None and process is not None,
+                f"Local browser viewer did not start; see {log_path}")
+        state = {"pid":process.pid, "port":ready["port"], "token":token,
+                 "session":session, "workspace":workspace, "board":board,
+                 "database":str(database), "workspace_label":label, "version":VERSION,
+                 "build_id":build}
+        atomic_json(state_path, state)
+        threading.Thread(target=process.wait, name="herdr-tasks-web-reaper",
+                         daemon=True).start()
+        return web_result(state, False)
+
+
+def stop_web_server(session, workspace):
+    state_path, lock_path, _ = web_state_paths(session, workspace)
+    lock_descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(lock_descriptor, "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        stopped = terminate_web_state(read_web_state(state_path))
+        state_path.unlink(missing_ok=True)
+        return stopped
+
+
+def stop_web_servers(session):
+    stopped = 0
+    root = web_state_dir()
+    if not root.exists():
+        return stopped
+    for path in root.glob("*.json"):
+        state = read_web_state(path)
+        if state and state.get("session") == session and state.get("workspace"):
+            stopped += int(stop_web_server(session, state["workspace"]))
+    return stopped
+
+
+def start_bound_web_servers(session, database=None):
+    database = Path(database or db_path()).resolve()
+    store = Store(database, readonly=True)
+    try:
+        workspaces = [item["workspace"] for item in store.space_bindings(session)]
+    finally:
+        store.close()
+    result = []
+    for workspace in workspaces:
+        try:
+            result.append(ensure_web_server(session, workspace, database))
+        except (ValueError, OSError, sqlite3.Error) as error:
+            result.append({"workspace":workspace, "error":str(error)})
+    return result
+
+
+def browser_url(session, workspace):
+    return ensure_web_server(session, workspace)
+
+
+def open_browser(session, workspace):
+    require(workspace, "Choose a Herdr space first")
+    result = browser_url(session, workspace)
+    if sys.platform == "darwin":
+        command = ["open", "-g", result["url"]]
+    else:
+        opener = shutil.which("xdg-open")
+        require(opener, "Open the reported local URL in your browser")
+        command = [opener, result["url"]]
+    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    result["opened"] = True
+    return result
+
+
+def context_workspace(session):
+    workspace = os.environ.get("HERDR_WORKSPACE_ID") or os.environ.get("HERDR_ACTIVE_WORKSPACE_ID")
+    if workspace:
+        return workspace
+    try:
+        return herdr_snapshot(session).get("focused_workspace_id")
+    except (ValueError, OSError, socket.timeout, KeyError, json.JSONDecodeError):
+        return None
+
+
+def make_web_handler(session, database, workspace, board, token, snapshot_reader=None,
+                     workspace_label=None):
+    assets = {"/": ("text/html; charset=utf-8", WEB_ROOT/"index.html"),
+              "/styles.css": ("text/css; charset=utf-8", WEB_ROOT/"styles.css"),
+              "/app.js": ("text/javascript; charset=utf-8", WEB_ROOT/"app.js")}
+    identity = {"ok":True, "session_id":web_fingerprint(session),
+                "workspace_id":web_fingerprint(workspace), "board":board,
+                "database_id":web_fingerprint(Path(database).resolve()),
+                "build_id":web_build_id(), "pid":os.getpid()}
+    prefix = "/v/"+urllib.parse.quote(token, safe="")
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "HerdrTasks/"+VERSION
+        protocol_version = "HTTP/1.1"
+
+        def version_string(self):
+            return "HerdrTasks"
+
+        def allowed_host(self):
+            host = self.headers.get("Host", "")
+            return host == f"127.0.0.1:{self.server.server_port}"
+
+        def send_body(self, status, content_type, body):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'none'; script-src 'self'; style-src 'self'; "
+                             "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
+                             "form-action 'none'; frame-ancestors 'none'")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def do_HEAD(self):
+            self.do_GET()
+
+        def do_GET(self):
+            if not self.allowed_host():
+                self.send_body(421, "text/plain; charset=utf-8", b"Local host required\n")
+                return
+            request = urllib.parse.urlsplit(self.path)
+            if not request.path.startswith(prefix+"/"):
+                self.send_body(404, "text/plain; charset=utf-8", b"Not found\n")
+                return
+            path = request.path[len(prefix):]
+            if path == "/health":
+                body = json.dumps(identity,separators=(",", ":")).encode()
+                self.send_body(200, "application/json; charset=utf-8", body)
+                return
+            if path == "/api/state":
+                try:
+                    store = Store(database, readonly=True)
+                    try:
+                        live = snapshot_reader(session) if snapshot_reader else {}
+                        payload = browser_payload(store, session, workspace, board,
+                                                  live=live, workspace_label=workspace_label)
+                    finally:
+                        store.close()
+                    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+                    self.send_body(200, "application/json; charset=utf-8", body)
+                except (ValueError, OSError, sqlite3.Error, socket.timeout,
+                        KeyError, json.JSONDecodeError) as error:
+                    body = json.dumps({"error":str(error)}, ensure_ascii=False).encode()
+                    self.send_body(503, "application/json; charset=utf-8", body)
+                return
+            asset = assets.get(path)
+            if asset:
+                content_type, path = asset
+                try:
+                    self.send_body(200, content_type, path.read_bytes())
+                except OSError:
+                    self.send_body(503, "text/plain; charset=utf-8", b"Viewer assets unavailable\n")
+                return
+            if path == "/favicon.ico":
+                self.send_body(204, "image/x-icon", b"")
+                return
+            self.send_body(404, "text/plain; charset=utf-8", b"Not found\n")
+
+        def do_POST(self):
+            if not self.allowed_host():
+                self.send_body(421, "text/plain; charset=utf-8", b"Local host required\n")
+                return
+            if not urllib.parse.urlsplit(self.path).path.startswith(prefix+"/"):
+                self.send_body(404, "text/plain; charset=utf-8", b"Not found\n")
+                return
+            self.send_body(405, "text/plain; charset=utf-8", b"Read-only viewer\n")
+
+        do_PUT = do_POST
+        do_PATCH = do_POST
+        do_DELETE = do_POST
+        do_OPTIONS = do_POST
+
+        def log_message(self, *_):
+            pass
+
+    return Handler
+
+
+class LocalWebServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def serve_web(session, workspace, board, port, database, token, ready, workspace_label):
+    require(Path(session).is_absolute(), "Web viewer requires an absolute Herdr socket path")
+    require(isinstance(workspace, str) and workspace, "Invalid Herdr space")
+    require(isinstance(board, int) and board > 0, "Invalid queue")
+    require(0 <= port <= 65535, "Invalid local web port")
+    require(isinstance(token, str) and len(token) >= 32, "Invalid local viewer token")
+    database = Path(database).resolve()
+    server = LocalWebServer((WEB_HOST, port),
+                            make_web_handler(session, database, workspace, board, token,
+                                             workspace_label=workspace_label))
+    server.timeout = 1
+    atomic_json(ready, {"port":server.server_port, "pid":os.getpid()})
+    stopping = False
+    def stop(*_):
+        nonlocal stopping
+        stopping = True
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    failures = 0
+    next_check = time.monotonic()+60
+    try:
+        while not stopping:
+            server.handle_request()
+            if time.monotonic() >= next_check:
+                try:
+                    herdr_snapshot(session)
+                    failures = 0
+                except (ValueError, OSError, socket.timeout, KeyError, json.JSONDecodeError):
+                    failures += 1
+                if failures >= 10:
+                    break
+                next_check = time.monotonic()+60
+    finally:
+        server.server_close()
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--version", action="version", version=VERSION)
@@ -499,8 +979,9 @@ def parser():
     group = u.add_mutually_exclusive_group()
     group.add_argument("--owner")
     group.add_argument("--unassign", action="store_true")
-    sub.add_parser("view", help="Read-only, clickable inline task list")
-    o = sub.add_parser("open", help="Open/reuse a compact task split in the focused space")
+    sub.add_parser("view", help="Legacy read-only terminal task list")
+    sub.add_parser("open", help="Open the current space's full queue in a local browser")
+    o = sub.add_parser("pane", help="Open/reuse the legacy compact terminal viewer")
     o.add_argument("--pane",help="Explicit terminal to split; otherwise focused terminal")
     o.add_argument("--no-focus",action="store_true")
     b = sub.add_parser("bind-space", help="Link an existing queue to one Herdr workspace")
@@ -508,6 +989,16 @@ def parser():
     sub.add_parser("status",help="Short read-only summary for Herdr's active workspace")
     s = sub.add_parser("setup", help="Install CLI, skill and top-bar summary; optional shortcut")
     s.add_argument("--key",help="Optional explicit Herdr binding, e.g. alt+t; no default")
+    sub.add_parser("web-start", help="Start/reuse the session's local browser service")
+    s = sub.add_parser("serve", help=argparse.SUPPRESS)
+    s.add_argument("--session",required=True)
+    s.add_argument("--workspace",required=True)
+    s.add_argument("--board",required=True,type=int)
+    s.add_argument("--workspace-label",required=True)
+    s.add_argument("--port",required=True,type=int)
+    s.add_argument("--db",required=True,type=Path)
+    s.add_argument("--token",required=True)
+    s.add_argument("--ready",required=True,type=Path)
     sub.add_parser("uninstall", help="Remove integration; keep data")
     sub.add_parser("skill", help="Print the agent workflow")
     return p
@@ -517,6 +1008,17 @@ def main():
     args = parser().parse_args()
     if args.command == "skill":
         print((ROOT/"skill/SKILL.md").read_text())
+        return
+    if args.command == "serve":
+        serve_web(str(args.session), args.workspace, args.board, args.port, args.db,
+                  args.token, args.ready, args.workspace_label)
+        return
+    if args.command == "web-start":
+        print(json.dumps(start_bound_web_servers(socket_context()), indent=2))
+        return
+    if args.command == "open":
+        session = socket_context()
+        print(json.dumps(open_browser(session, context_workspace(session)), indent=2))
         return
     if args.command == "status":
         # Status commands have active workspace context but no agent/pane identity.
@@ -535,14 +1037,21 @@ def main():
                 store.close()
         return
     if args.command in ("setup", "uninstall"):
+        session = session_key()
+        if args.command == "uninstall":
+            stopped = stop_web_servers(session)
         result = setup(remove=args.command == "uninstall",key=getattr(args,"key",None))
+        if args.command == "setup":
+            result["browsers"] = start_bound_web_servers(session)
+        else:
+            result["stopped_browsers"] = stopped
         print(json.dumps(result))
         return
     store = Store()
     try:
         if args.command == "boards":
             result = store.boards()
-        elif args.command == "open":
+        elif args.command == "pane":
             result = open_board(store,args.pane,not args.no_focus)
         elif args.command == "bind-space":
             require(args.board,"Use --board NAME before bind-space")

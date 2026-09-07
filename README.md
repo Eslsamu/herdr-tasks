@@ -2,28 +2,11 @@
 
 **Talk to your agents. Watch the work. Don't manage cards.**
 
-A small Herdr plugin for people who already work with several long-running agent conversations. Agents own a shared task board, record new requests, choose what comes next, and keep the status current. You get a read-only terminal overview.
+A small Herdr plugin for people who already work with several long-running agent conversations. Agents own a shared task board, record new requests, choose what comes next, and keep the status current. You get an always-visible Herdr summary and a read-only local browser overview.
 
-```
- Product / Tasks                                      [Close]
- 1 now · 1 next · 1 waiting
+The full view is one calm vertical ledger: **Now**, **Waiting**, **Next**, and collapsed **Finished** history. Click any task to expand its brief and latest update.
 
- Now · 1
- v #6  Dev · Fix CSV export
-    Preserve quoted commas and Unicode.
-    Update: Testing the parser fix.
-
- Waiting · 1
- > #5  GTM · Publish launch
-   Needs domain choice
-
- Next · 1
- > #8  Dev · Saved filters
-
- > Finished · 4
-```
-
-No web app, server, model API, telemetry, external account, or Python package dependencies. Task data stays on your machine. Works with existing conversations; does not start, stop, fork, resume, or replace them.
+There is no remote service, model API, telemetry, external account, or Python package dependency. A small loopback-only server exposes exactly one space queue behind an opaque local URL; it never accepts writes. Task data stays on your machine. The plugin works with existing conversations and does not start, stop, fork, resume, or replace them.
 
 ## Install
 
@@ -32,13 +15,13 @@ Requires macOS/Linux, **Herdr 0.8.2+**, and **Python 3.10+ with curses**. The in
 Inside Herdr:
 
 ```sh
-herdr plugin install Eslsamu/herdr-tasks --ref v0.2.0
+herdr plugin install Eslsamu/herdr-tasks --ref v0.3.0
 herdr plugin action invoke setup --plugin herdr-tasks
 ```
 
-Setup links the CLI into `~/.local/bin`, installs a Codex skill into `~/.codex/skills/herdr-tasks`, and adds a live current-space summary to Herdr's top tab bar. It backs up your config and preserves unrelated settings. **No shortcut is assigned by default.** Use Herdr's plugin action **Tasks: open space queue**, or `herdr-tasks open`.
+Setup links the CLI into `~/.local/bin`, installs a Codex skill into `~/.codex/skills/herdr-tasks`, adds a live current-space summary to Herdr's top tab bar, and starts local viewers for linked spaces. It backs up your config and preserves unrelated settings. **No shortcut is assigned by default.** Use Herdr's plugin action **Tasks: open space queue in browser**, or `herdr-tasks open`.
 
-**The preview is visible without opening anything or prompting an agent.** It shows the current task (or the next/waiting task when idle) and queue counts, and follows the selected space. Closing the detail pane leaves the preview in place. Setup pins its working Python interpreter because Herdr's server does not use your terminal's login-shell PATH. Re-run setup if that interpreter or the checkout moves. Status reads only the server's session and active-space context; it does not require an agent pane or run agent commands.
+**The preview is visible without opening anything or prompting an agent.** It shows the current task (or the next/waiting task when idle) and queue counts, and follows the selected space. The browser viewer is a separate read-only tab that refreshes every two seconds. Setup pins its working Python interpreter because Herdr's server does not use your terminal's login-shell PATH. Re-run setup if that interpreter or the checkout moves. Status reads only the server's session and active-space context; it does not require an agent pane or run agent commands.
 
 For an optional shortcut, run `herdr-tasks setup --key alt+t` with a binding your terminal actually delivers. This is an example, not a universal Mac keyboard recommendation. Configured conflicts are rejected. Running setup without `--key` removes the plugin's previous shortcut, including the old Ctrl+B / Shift+T binding.
 
@@ -62,11 +45,11 @@ Joining links that queue to the agent's Herdr space. Give the same queue name to
 
 > After your current task, fix CSV export and add saved filters.
 
-The agent records and orders those requests. You only open the viewer. It opens **below the focused terminal**, using about 30% of that terminal's height, and keeps the other panes intact. It is a normal split, not an overlay or popup. Drag Herdr's divider if you want more space. Reopening in the same tab reuses the existing viewer.
+The agent records and orders those requests. You only open the viewer. The action opens the current space's local URL in your default browser without changing Herdr's panes. Reopening reuses the same space-specific server and URL. Keep or bookmark the tab if you want the full queue permanently available.
 
-**Click a task** or press **Enter/Space** to expand its description inline. **Arrows/j/k** select tasks; **mouse wheel/PageUp/PageDown** scroll. Finished/cancelled work is under a collapsed history row. **[Close]**, **q**, or **Esc** closes only the viewer; the original terminal regains its split space and the top-bar summary remains. Classic xterm and SGR mouse reports depend on the terminal's advertised capabilities.
+**Click a task** or use **Tab then Enter/Space** to expand its description, latest update, dependency state, priority, and timestamp. Finished/cancelled work is collapsed by default. The layout stays one ordered list at every width, including mobile. The page preserves expanded rows and scroll position across live refreshes.
 
-The layout stays a single ordered list at every width. Short panes show a scroll range. Your agents continue working while it is open; typing goes to whichever pane you focus.
+For a terminal-only fallback, use the plugin action **Tasks: open terminal fallback** or `herdr-tasks pane`. It creates the former compact split below the focused terminal without replacing any agent PTY. Close that fallback with its **[Close]** control, **q**, or **Esc**.
 
 An operator can enroll an existing agent without typing into its terminal:
 
@@ -111,10 +94,12 @@ herdr-tasks update 1 --status done --note "Quoted fields fixed; regression tests
 herdr-tasks show 1
 herdr-tasks --board Product list
 herdr-tasks --board Product view
+herdr-tasks open
+herdr-tasks pane
 herdr-tasks --help
 ```
 
-Read-only `boards`, explicit-board `list`, `show`, and `view` also work outside Herdr. Task writes require a Herdr agent with a reported durable session ID. Default commands use the calling agent's space binding, or legacy conversation membership when no binding exists. Use `--board NAME` for explicit selection. Operator integration commands such as `bind-space` and `open` require Herdr context but do not pretend to be an agent.
+Read-only `boards`, explicit-board `list`, `show`, and terminal `view` also work outside Herdr. Task writes require a Herdr agent with a reported durable session ID. Default commands use the calling agent's space binding, or legacy conversation membership when no binding exists. Use `--board NAME` for explicit selection. Operator integration commands such as `bind-space`, `open`, and `pane` require Herdr context but do not pretend to be an agent.
 
 ## Data and removal
 
@@ -129,7 +114,7 @@ herdr plugin action invoke uninstall --plugin herdr-tasks
 herdr plugin uninstall herdr-tasks
 ```
 
-For a linked local checkout, use `herdr plugin unlink herdr-tasks` as the second command. Cleanup removes only its own CLI/skill links and marked status/shortcut block. **Task data is kept.** Close task viewers with their [Close] button before removing the plugin. No conversations are touched.
+For a linked local checkout, use `herdr plugin unlink herdr-tasks` as the second command. Cleanup stops this session's verified loopback viewers and removes only its own CLI/skill links and marked status/shortcut block. **Task data is kept.** No conversations are touched.
 
 ## Develop
 
@@ -137,6 +122,6 @@ For a linked local checkout, use `herdr plugin unlink herdr-tasks` as the second
 python3 -m unittest -v
 ```
 
-One Python program, SQLite, curses, and a Herdr manifest. The included tests cover ownership, concurrent claims, dependencies, resume/fork identity, and configuration integration. No package installation required.
+One standard-library Python program, SQLite, a small dependency-free browser view, curses fallback, and a Herdr manifest. The tests cover ownership, concurrent claims, dependencies, resume/fork identity, browser isolation, and configuration integration. No package installation required.
 
 MIT licensed.

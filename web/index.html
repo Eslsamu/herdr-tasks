@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <title>Herdr Tasks</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#queue-content">Skip to queue</a>
+
+    <div class="page-shell">
+      <header class="page-header">
+        <div class="identity">
+          <h1 class="queue-title">
+            <span id="workspace-name">Current space</span>
+            <span class="title-separator" aria-hidden="true">/</span>
+            <span id="board-name">Tasks</span>
+          </h1>
+          <div class="connection-line">
+            <span id="connection-dot" class="connection-dot is-loading" aria-hidden="true"></span>
+            <span id="connection-status" role="status" aria-live="polite">Read-only · Connecting</span>
+            <span class="connection-divider" aria-hidden="true"></span>
+            <time id="refresh-time">Waiting for first refresh</time>
+          </div>
+        </div>
+
+        <dl class="queue-counts" aria-label="Queue summary">
+          <div>
+            <dt>Now</dt>
+            <dd id="count-now">0</dd>
+          </div>
+          <div>
+            <dt>Waiting</dt>
+            <dd id="count-waiting">0</dd>
+          </div>
+          <div>
+            <dt>Next</dt>
+            <dd id="count-next">0</dd>
+          </div>
+          <div>
+            <dt>Finished</dt>
+            <dd id="count-finished">0</dd>
+          </div>
+        </dl>
+      </header>
+
+      <main id="queue-content" class="queue-content" aria-busy="true">
+        <div id="sync-message" class="sync-message" role="status" hidden></div>
+
+        <section id="loading-state" class="message-state" aria-labelledby="loading-title">
+          <span class="loading-mark" aria-hidden="true"></span>
+          <div>
+            <h2 id="loading-title">Opening the queue</h2>
+            <p>Connecting to the local read-only view.</p>
+          </div>
+        </section>
+
+        <section id="error-state" class="message-state is-error" aria-labelledby="error-title" hidden>
+          <div>
+            <h2 id="error-title">The queue is temporarily unavailable</h2>
+            <p id="error-copy">The viewer will keep trying in the background.</p>
+          </div>
+        </section>
+
+        <section id="empty-state" class="message-state" aria-labelledby="empty-title" hidden>
+          <div>
+            <h2 id="empty-title">The queue is clear</h2>
+            <p id="empty-copy">There is no active or queued work.</p>
+          </div>
+        </section>
+
+        <div id="queue" class="queue" hidden>
+          <section id="group-now" class="queue-group" aria-labelledby="heading-now" hidden>
+            <header class="group-header">
+              <h2 id="heading-now">Now</h2>
+              <span id="group-count-now" class="group-count"></span>
+            </header>
+            <div id="list-now" class="task-list"></div>
+          </section>
+
+          <section id="group-waiting" class="queue-group" aria-labelledby="heading-waiting" hidden>
+            <header class="group-header">
+              <h2 id="heading-waiting">Waiting</h2>
+              <span id="group-count-waiting" class="group-count"></span>
+            </header>
+            <div id="list-waiting" class="task-list"></div>
+          </section>
+
+          <section id="group-next" class="queue-group" aria-labelledby="heading-next" hidden>
+            <header class="group-header">
+              <h2 id="heading-next">Next</h2>
+              <span id="group-count-next" class="group-count"></span>
+            </header>
+            <div id="list-next" class="task-list"></div>
+          </section>
+
+          <details id="group-finished" class="queue-group history-group" hidden>
+            <summary class="group-header history-summary">
+              <span class="group-heading" role="heading" aria-level="2">Finished</span>
+              <span id="group-count-finished" class="group-count"></span>
+            </summary>
+            <div id="list-finished" class="task-list"></div>
+          </details>
+        </div>
+      </main>
+
+      <footer class="page-footer">
+        <span>Live updates every 2 seconds</span>
+        <span aria-hidden="true">·</span>
+        <span>Local to this machine</span>
+      </footer>
+    </div>
+
+    <noscript>
+      <p class="noscript-message">JavaScript is required for the live queue viewer.</p>
+    </noscript>
+  </body>
+</html>

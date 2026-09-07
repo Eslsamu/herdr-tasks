@@ -5,7 +5,7 @@ description: Maintain an agent-owned task board for an existing Herdr conversati
 
 # Herdr Tasks
 
-Use `herdr-tasks` in a Herdr agent pane. Each queue is linked to one workspace in one Herdr session. Ownership identifies the conversation; a resumed conversation retains ownership. A fork must explicitly join and does not inherit task ownership. No model API, daemon, prompt injection, or background task execution is provided by this plugin.
+Use `herdr-tasks` in a Herdr agent pane. Each queue is linked to one workspace in one Herdr session. Ownership identifies the conversation; a resumed conversation retains ownership. A fork must explicitly join and does not inherit task ownership. The plugin has no model API, prompt injection, remote service, or background task execution. Its only background process is a loopback-only, read-only viewer for each linked space.
 
 ## First use
 
@@ -53,4 +53,4 @@ herdr-tasks show 12
 
 `add` assigns to yourself by default. `--owner` names an already enrolled agent. An unassigned queued task can be claimed by any board member. Dependencies must already exist on this board; all must be done before a task starts. Priority 0 is highest; tasks of equal priority run oldest first. `update --unassign` releases queued work to the shared pool. Active work can only be updated by its owner; reassign only after returning it to queued.
 
-Do not modify the database directly. Do not write task data into the plugin repository. The human's viewer is a read-only compact pane with clickable descriptions; the top bar shows the current space's summary. Both refresh automatically. Closing the viewer closes only that temporary pane, not its queue or any agent. Do not use `layout.apply` to add or remove a viewer: it replaces live terminals. The human talks to you, not to a card-management form.
+Do not modify the database directly. Do not write task data into the plugin repository. The top bar shows the active space's compact summary; the full read-only browser viewer groups Now, Waiting, Next, and Finished and refreshes automatically. A terminal split remains an explicit fallback only. Never use `layout.apply` to add or remove a viewer because it replaces live terminals. The human talks to you, not to a card-management form.
