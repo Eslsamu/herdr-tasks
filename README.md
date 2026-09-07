@@ -10,6 +10,25 @@ Herdr Tasks is a small local-first plugin for coordinating work across long-runn
 
 ![Herdr Tasks browser queue showing generic demo work](docs/assets/queue-desktop.png)
 
+## Try it in two minutes
+
+Inside a named Herdr session:
+
+```sh
+herdr plugin install Eslsamu/herdr-tasks --ref v0.3.1
+herdr plugin action invoke setup --plugin herdr-tasks
+```
+
+Then tell an agent in that space:
+
+> Read the installed `herdr-tasks` skill, join the `Demo` board, add “Review this README's setup steps,” and start it. Keep the queue current and take ready tasks in priority order.
+
+While it is working, add a follow-up without stopping the current task:
+
+> Keep going. Add “Review the result” for later and do not abandon your current task.
+
+Open **Tasks: open space queue in browser** from Herdr's action menu. The agent owns the queue; the browser is a read-only live view. See [Install](#install) and [Start a queue](#start-a-queue) for the complete setup and operating model.
+
 ## Why it exists
 
 When several agents work in parallel, a normal Kanban board creates another interface for the human to maintain. Herdr Tasks inverts that model:
@@ -81,7 +100,7 @@ herdr plugin action invoke setup --plugin herdr-tasks
 
 Tell an agent in the space:
 
-> Read `herdr-tasks skill`, join the `ProjectName` board, and maintain it for the work I give you. Record later requests without abandoning your current task. Keep the board current and work through the authorized queue.
+> Read the installed `herdr-tasks` skill, join the `ProjectName` board, and maintain it for the work I give you. Record later requests without abandoning your current task. Keep the board current and work through the authorized queue.
 
 Or run the initial commands in that agent pane:
 

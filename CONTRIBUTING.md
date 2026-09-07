@@ -22,6 +22,21 @@ herdr plugin action invoke setup --plugin herdr-tasks
 
 Use a disposable named Herdr session and a temporary `HERDR_TASKS_DB` when testing integration changes. Do not use a real task database as a fixture.
 
+## Code map
+
+| Area | Files |
+| --- | --- |
+| Queue rules, SQLite storage, Herdr identity, space binding, setup, and browser service | `herdr_tasks.py` |
+| Optional terminal viewer | `queue_view.py` |
+| Semantic browser shell and states | `web/index.html` |
+| Polling, classification, rendering, and view preservation | `web/app.js` |
+| Responsive layout, focus, color modes, and reduced motion | `web/styles.css` |
+| Agent queue-maintenance contract | `skill/SKILL.md` |
+| Herdr entry points and portable launcher | `herdr-plugin.toml`, `run.sh` |
+| Behavioral tests and supported OS/Python matrix | `test_herdr_tasks.py`, `.github/workflows/test.yml` |
+
+Start queue-semantics changes in the store and its tests. Herdr lifecycle changes belong with identity, setup, and integration tests. HTTP or privacy changes belong with the browser payload/handler and browser tests. Browser behavior changes need both `web/` coverage and the manual browser checklist below. Agent-behavior changes must keep the installed skill and README examples aligned.
+
 ## Design constraints
 
 Changes should preserve these properties:
@@ -56,4 +71,4 @@ Use generic names such as `SpaceName`, `ProjectName`, `Agent One`, and `Agent Tw
 
 ## Reporting problems
 
-Use a GitHub issue for ordinary bugs and feature proposals. For a vulnerability or suspected data exposure, follow [SECURITY.md](SECURITY.md) instead.
+Use a GitHub issue for ordinary bugs and feature proposals. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). For a vulnerability or suspected data exposure, follow [SECURITY.md](SECURITY.md) instead.
