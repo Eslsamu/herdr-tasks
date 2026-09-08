@@ -800,13 +800,19 @@ def open_browser(session, workspace):
     result = browser_url(session, workspace)
     if sys.platform == "darwin":
         command = ["open", "-g", result["url"]]
+        subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+        result["opened"] = True
     else:
         opener = shutil.which("xdg-open")
-        require(opener, "Open the reported local URL in your browser")
-        command = [opener, result["url"]]
-    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-    result["opened"] = True
+        if opener:
+            command = [opener, result["url"]]
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+            result["opened"] = True
+        else:
+            result["opened"] = False
+            result["reason"] = "Open the reported local URL in your browser"
     return result
 
 
@@ -1011,7 +1017,7 @@ def parser():
     group.add_argument("--owner")
     group.add_argument("--unassign", action="store_true")
     sub.add_parser("view", help="Legacy read-only terminal task list")
-    sub.add_parser("open", help="Open the current space's full queue in a local browser")
+    sub.add_parser("open", aliases=["browser"], help="Open the current space's full queue in a local browser")
     o = sub.add_parser("pane", help="Open/reuse the legacy compact terminal viewer")
     o.add_argument("--pane",help="Explicit terminal to split; otherwise focused terminal")
     o.add_argument("--no-focus",action="store_true")
@@ -1051,7 +1057,7 @@ def main():
     if args.command == "web-start":
         print(json.dumps(start_bound_web_servers(socket_context()), indent=2))
         return
-    if args.command == "open":
+    if args.command in ("open", "browser"):
         session = socket_context()
         print(json.dumps(open_browser(session, context_workspace(session)), indent=2))
         return
