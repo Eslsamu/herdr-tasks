@@ -161,6 +161,8 @@ herdr-tasks open       # local browser for the current space
 herdr-tasks pane       # optional compact terminal split
 ```
 
+`herdr-tasks open` launches the browser viewer using `open` on macOS or `xdg-open` on Linux. On headless or minimal Linux installations where `xdg-open` is not available, the local viewer is started or reused normally and the command outputs the capability URL with `"opened": false` and an actionable reason so it can be opened manually.
+
 Read-only `boards`, explicit-board `list`, `show`, and terminal `view` also work outside Herdr. Writes require a Herdr agent with a reported durable conversation ID. `--agent NAME` is available for explicit operator enrollment and coordination; it does not silently transfer another agent's active work.
 
 ## Local and read-only by design

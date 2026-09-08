@@ -3,6 +3,7 @@ import http.client
 import json
 import os
 import fcntl
+import io
 from pathlib import Path
 import select
 import struct
@@ -558,6 +559,72 @@ class IntegrationTests(unittest.TestCase):
                     self.assertEqual(api.call_count,2)
             finally:
                 store.close()
+
+    def test_open_browser_returns_url_and_fallback_when_xdg_open_missing(self):
+        sample = {"url":"http://127.0.0.1:8123/v/test-token/", "port":8123, "pid":1234,
+                  "workspace":"w1", "board":"Demo", "reused":False}
+        with patch.object(app, "browser_url", return_value=dict(sample)), \
+             patch.object(app.sys, "platform", "linux"), \
+             patch.object(app.shutil, "which", return_value=None), \
+             patch.object(app.subprocess, "Popen") as popen:
+            result = app.open_browser("session", "w1")
+            self.assertEqual(result["url"], "http://127.0.0.1:8123/v/test-token/")
+            self.assertFalse(result["opened"])
+            self.assertEqual(result["reason"], "Open the reported local URL in your browser")
+            self.assertEqual(result["port"], 8123)
+            self.assertFalse(result["reused"])
+            popen.assert_not_called()
+
+    def test_open_browser_handles_darwin_and_linux_openers(self):
+        sample = {"url":"http://127.0.0.1:8123/v/test-token/", "port":8123, "pid":1234,
+                  "workspace":"w1", "board":"Demo", "reused":True}
+        with patch.object(app, "browser_url", return_value=dict(sample)), \
+             patch.object(app.sys, "platform", "linux"), \
+             patch.object(app.shutil, "which", return_value="/usr/bin/xdg-open"), \
+             patch.object(app.subprocess, "Popen") as popen:
+            result = app.open_browser("session", "w1")
+            self.assertEqual(result["url"], "http://127.0.0.1:8123/v/test-token/")
+            self.assertTrue(result["opened"])
+            self.assertNotIn("reason", result)
+            popen.assert_called_once_with(
+                ["/usr/bin/xdg-open", "http://127.0.0.1:8123/v/test-token/"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True,
+            )
+
+        with patch.object(app, "browser_url", return_value=dict(sample)), \
+             patch.object(app.sys, "platform", "darwin"), \
+             patch.object(app.subprocess, "Popen") as popen:
+            result = app.open_browser("session", "w1")
+            self.assertEqual(result["url"], "http://127.0.0.1:8123/v/test-token/")
+            self.assertTrue(result["opened"])
+            self.assertNotIn("reason", result)
+            popen.assert_called_once_with(
+                ["open", "-g", "http://127.0.0.1:8123/v/test-token/"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True,
+            )
+
+        with self.assertRaises(ValueError):
+            app.open_browser("session", None)
+
+    def test_open_cli_command_output_when_opener_missing(self):
+        sample = {"url":"http://127.0.0.1:8123/v/test-token/", "port":8123, "pid":1234,
+                  "workspace":"w1", "board":"Demo", "reused":False}
+        with patch.object(app, "socket_context", return_value="sock"), \
+             patch.object(app, "context_workspace", return_value="w1"), \
+             patch.object(app, "browser_url", return_value=dict(sample)), \
+             patch.object(app.sys, "platform", "linux"), \
+             patch.object(app.shutil, "which", return_value=None), \
+             patch.object(app.subprocess, "Popen") as popen, \
+             patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+             patch.object(app.sys, "argv", ["herdr-tasks", "open"]):
+            app.main()
+            output = json.loads(stdout.getvalue())
+            self.assertEqual(output["url"], "http://127.0.0.1:8123/v/test-token/")
+            self.assertFalse(output["opened"])
+            self.assertEqual(output["reason"], "Open the reported local URL in your browser")
+            popen.assert_not_called()
 
     def test_identity_targets_calling_pane_not_focus(self):
         with patch.object(app, "api", side_effect=[
