@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Herdr Tasks · Codex to browser</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-content:center;background:#10141c;color:#edf0f6;font:16px system-ui}main{width:min(96vw,1440px)}video{width:100%;border-radius:12px}h1{font-size:24px;font-weight:500}p{color:#a9b5c9}.playback{display:flex;align-items:center;gap:16px;margin-top:12px}button{font:inherit;padding:10px 16px;border:1px solid #8da5cd;border-radius:8px;background:#253149;color:#fff;cursor:pointer}output{color:#a9b5c9}</style>
+<main><h1>Herdr Tasks · Dev and QA</h1><video controls autoplay playsinline muted preload="auto" poster="herdr-tasks-handoff-start.png"><source src="herdr-tasks-walkthrough-v3.mp4" type="video/mp4"></video><div class="playback"><button type="button" id="restart">Play from beginning</button><output id="status" aria-live="polite">Loading video…</output></div><p>Shopping List: a normal request, Dev’s fix, and QA’s checks beside their shared queue. Actual terminal recording with task-history replay, summary highlights, and waiting shortened. 42 seconds.</p></main>
+<script>
+const video=document.querySelector('video'),status=document.querySelector('#status');
+function update(){status.textContent=(video.ended?'Finished':video.paused?'Paused':'Playing')+' · '+Math.floor(video.currentTime)+' / 42 seconds';}
+async function restart(){video.currentTime=0;try{await video.play();}catch{status.textContent='Playback is paused. Press the video’s Play button.';}}
+document.querySelector('#restart').addEventListener('click',restart);
+for(const event of ['timeupdate','play','pause','ended'])video.addEventListener(event,update);
+video.addEventListener('loadedmetadata',restart,{once:true});
+video.addEventListener('error',()=>{status.textContent='Video could not load. Open herdr-tasks-walkthrough-v3.mp4 in a video player.';});
+</script>
