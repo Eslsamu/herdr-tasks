@@ -8,9 +8,13 @@
 
 Herdr Tasks is a small local-first plugin for coordinating work across long-running agent conversations. Agents capture requests, own tasks, record blockers, and pull the next ready item. Humans get a live summary in Herdr and a clean, read-only queue in their browser.
 
-![Animated demo: an agent adds follow-up work, the Herdr summary updates, and the space queue tracks progress.](docs/assets/herdr-tasks-demo.gif)
+[![Dev fixes blank shopping-list items while QA waits, then QA tests the fix. Both Codex panes and their shared queue stay visible.](docs/assets/handoff/herdr-tasks-handoff.gif)](docs/assets/handoff/herdr-tasks-walkthrough-v3.mp4)
 
-*Example walkthrough: Herdr chat → browser queue. Scripted chat and sample tasks.*
+> The shopping list lets me add blank items. Please fix that and have QA check it.
+
+Dev and QA use the installed skill to track the fix and its checks. Watch the Herdr summary and shared queue update alongside both Codex panes.
+
+[Watch the full walkthrough (42 seconds)](docs/assets/handoff/herdr-tasks-walkthrough-v3.mp4) · Actual Codex recording with task-history replay; waiting shortened.
 
 ## Try it in two minutes
 
